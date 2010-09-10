@@ -28,7 +28,6 @@ import rfb
 
 from gevent import socket
 from gevent.select import select
-from struct import pack, unpack
 
 class VncForwarder(gevent.Greenlet):
     """
