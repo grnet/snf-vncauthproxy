@@ -29,12 +29,12 @@ import rfb
 from gevent import socket
 from gevent.select import select
 
-class VncForwarder(gevent.Greenlet):
+class VncAuthProxy(gevent.Greenlet):
     """
     Simple class implementing a VNC Forwarder with MITM authentication as a
     Greenlet
 
-    VncForwarder forwards VNC traffic from a specified port of the local host
+    VncAuthProxy forwards VNC traffic from a specified port of the local host
     to a specified remote host:port. Furthermore, it implements VNC
     Authentication, intercepting the client/server handshake and asking the
     client for authentication even if the backend requires none.
@@ -61,8 +61,8 @@ class VncForwarder(gevent.Greenlet):
 
         """
         gevent.Greenlet.__init__(self)
-        self.id = VncForwarder.id
-        VncForwarder.id += 1
+        self.id = VncAuthProxy.id
+        VncAuthProxy.id += 1
         self.sport = sport
         self.daddr = daddr
         self.dport = dport
@@ -96,7 +96,7 @@ class VncForwarder(gevent.Greenlet):
         logging.critical("[C%d] %s" % (self.id, msg))
 
     def __str__(self):
-        return "VncForwarder: %d -> %s:%d" % (self.sport, self.daddr, self.dport)
+        return "VncAuthProxy: %d -> %s:%d" % (self.sport, self.daddr, self.dport)
 
     def _forward(self, source, dest):
         """
@@ -365,7 +365,7 @@ if __name__ == '__main__':
             continue
 
         client.send("OK\n")
-        VncForwarder.spawn(sport, daddr, dport, password, opts.connect_timeout)
+        VncAuthProxy.spawn(sport, daddr, dport, password, opts.connect_timeout)
         client.close()
 
     os.unlink(opts.ctrl_socket)
