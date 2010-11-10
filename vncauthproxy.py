@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #
 
-# Copyright (c) 2010 Apollon Oikonomopoulos
+# Copyright (c) 2010 GRNET SA
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
