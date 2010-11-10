@@ -349,6 +349,8 @@ if __name__ == '__main__':
         line = client.recv(1024).strip()
         try:
             # Control message format:
+            # TODO: make this json-based?
+            # TODO: support multiple forwardings in the same message?
             # <source_port>:<destination_address>:<destination_port>:<password>
             # <password> will be used for MITM authentication of clients
             # connecting to <source_port>, who will subsequently be forwarded
