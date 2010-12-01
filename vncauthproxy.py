@@ -177,26 +177,37 @@ class VncAuthProxy(gevent.Greenlet):
         # Accept the authentication
         self.client.send(rfb.to_u32(rfb.RFB_AUTH_SUCCESS))
 
-        # Initiate server connection
-        for res in socket.getaddrinfo(self.daddr, self.dport, socket.AF_UNSPEC,
-                                      socket.SOCK_STREAM, 0, socket.AI_PASSIVE):
-            af, socktype, proto, canonname, sa = res
-            try:
-                self.server = socket.socket(af, socktype, proto)
-            except socket.error, msg:
-                self.server = None
-                continue;
+        # Try to connect to the server
+        tries = 50
 
-            try:
-                self.debug("Connecting to %s:%s" % sa[:2])
-                self.server.connect(sa)
-                self.debug("Connection to %s:%s successful" % sa[:2])
-            except socket.error, msg:
-                self.server.close()
-                self.server = None
-                continue;
+        while tries:
+            tries -= 1
 
-            break
+            # Initiate server connection
+            for res in socket.getaddrinfo(self.daddr, self.dport, socket.AF_UNSPEC,
+                                          socket.SOCK_STREAM, 0, socket.AI_PASSIVE):
+                af, socktype, proto, canonname, sa = res
+                try:
+                    self.server = socket.socket(af, socktype, proto)
+                except socket.error, msg:
+                    self.server = None
+                    continue
+
+                try:
+                    self.debug("Connecting to %s:%s" % sa[:2])
+                    self.server.connect(sa)
+                    self.debug("Connection to %s:%s successful" % sa[:2])
+                except socket.error, msg:
+                    self.server.close()
+                    self.server = None
+                    continue
+
+                # We succesfully connected to the server
+                tries = 0
+                break
+
+            # Wait and retry
+            gevent.sleep(0.2)
 
         if self.server is None:
             self.error("Failed to connect to server")
