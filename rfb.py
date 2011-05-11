@@ -31,7 +31,7 @@ RFB_VERSION_3_8 = "RFB 003.008"
 RFB_VERSION_3_7 = "RFB 003.007"
 RFB_VERSION_3_3 = "RFB 003.003"
 RFB_VALID_VERSIONS = [
-#    RFB_VERSION_3_3,
+    RFB_VERSION_3_3,
 #    RFB_VERSION_3_7,
     RFB_VERSION_3_8,
 ]
@@ -40,14 +40,25 @@ class RfbError(Exception):
     pass
 
 def check_version(version):
-    return version.strip()[:11] in RFB_VALID_VERSIONS
+    if version.strip()[:11] in RFB_VALID_VERSIONS:
+        return version.strip()[:11]
+    else:
+        return None
 
-def make_auth_request(*auth_methods):
+def make_auth_request(*args, **kwargs):
+    auth_methods = args
+    version = kwargs['version']
+    if version == RFB_VERSION_3_3:
+        if len(auth_methods) != 1:
+            raise RfbError("Only single authentication type may be specified for RFB 3.3")
     auth_methods = set(auth_methods)
     for method in auth_methods:
         if method not in RFB_SUPPORTED_AUTHTYPES:
             raise RfbError("Unsupported authentication type: %d" % method)
-    return pack('B' + 'B' * len(auth_methods), len(auth_methods), *auth_methods)
+    if version == RFB_VERSION_3_3:
+        return pack('>I', *auth_methods)
+    else:
+        return pack('B' + 'B' * len(auth_methods), len(auth_methods), *auth_methods)
 
 def parse_auth_request(request):
     length = unpack('B', request[0])[0]

@@ -46,7 +46,6 @@ from signal import SIGINT, SIGTERM
 from gevent import signal
 from gevent.select import select
 
-
 class VncAuthProxy(gevent.Greenlet):
     """
     Simple class implementing a VNC Forwarder with MITM authentication as a
@@ -145,7 +144,7 @@ class VncAuthProxy(gevent.Greenlet):
         """
 
         while True:
-            d = source.recv(8096)
+            d = source.recv(16384)
             if d == '':
                 if source == self.client:
                     self.info("Client connection closed")
@@ -156,14 +155,13 @@ class VncAuthProxy(gevent.Greenlet):
         # No need to close the source and dest sockets here.
         # They are owned by and will be closed by the original greenlet.
 
-
     def _handshake(self):
         """
         Perform handshake/authentication with a connecting client
 
         Outline:
         1. Client connects
-        2. We fake RFB 3.8 protocol and require VNC authentication
+        2. We fake RFB 3.8 protocol and require VNC authentication [also supports RFB 3.3]
         3. Client accepts authentication method
         4. We send an authentication challenge
         5. Client sends the authentication response
@@ -176,25 +174,32 @@ class VncAuthProxy(gevent.Greenlet):
 
         """
         self.client.send(rfb.RFB_VERSION_3_8 + "\n")
-        client_version = self.client.recv(1024)
-        if not rfb.check_version(client_version):
-            self.error("Invalid version: %s" % client_version)
+        client_version_str = self.client.recv(1024)
+        client_version = rfb.check_version(client_version_str)
+        if not client_version:
+            self.error("Invalid version: %s" % client_version_str)
             raise gevent.GreenletExit
+
+        # Both for RFB 3.3 and 3.8
         self.debug("Requesting authentication")
-        auth_request = rfb.make_auth_request(rfb.RFB_AUTHTYPE_VNC)
+        auth_request = rfb.make_auth_request(rfb.RFB_AUTHTYPE_VNC,
+            version=client_version)
         self.client.send(auth_request)
-        res = self.client.recv(1024)
-        type = rfb.parse_client_authtype(res)
-        if type == rfb.RFB_AUTHTYPE_ERROR:
-            self.warn("Client refused authentication: %s" % res[1:])
-        else:
-            self.debug("Client requested authtype %x" % type)
 
-        if type != rfb.RFB_AUTHTYPE_VNC:
-            self.error("Wrong auth type: %d" % type)
-            self.client.send(rfb.to_u32(rfb.RFB_AUTH_ERROR))
-            raise gevent.GreenletExit
+        # The client gets to propose an authtype only for RFB 3.8
+        if client_version == rfb.RFB_VERSION_3_8:
+            res = self.client.recv(1024)
+            type = rfb.parse_client_authtype(res)
+            if type == rfb.RFB_AUTHTYPE_ERROR:
+                self.warn("Client refused authentication: %s" % res[1:])
+            else:
+                self.debug("Client requested authtype %x" % type)
 
+            if type != rfb.RFB_AUTHTYPE_VNC:
+                self.error("Wrong auth type: %d" % type)
+                self.client.send(rfb.to_u32(rfb.RFB_AUTH_ERROR))
+                raise gevent.GreenletExit
+        
         # Generate the challenge
         challenge = os.urandom(16)
         self.client.send(challenge)
@@ -307,15 +312,18 @@ class VncAuthProxy(gevent.Greenlet):
             # Bridge both connections through two "forwarder" greenlets.
             self.workers = [gevent.spawn(self._forward, self.client, self.server),
                 gevent.spawn(self._forward, self.server, self.client)]
+            
+            # If one greenlet goes, the other has to go too.
+            self.workers[0].link(self.workers[1])
+            self.workers[1].link(self.workers[0])
             gevent.joinall(self.workers)
-
             del self.workers
             raise gevent.GreenletExit
         except Exception, e:
             # Any unhandled exception in the previous block
             # is an error and must be logged accordingly
             if not isinstance(e, gevent.GreenletExit):
-                logger.exception(e)
+                self.log.exception(e)
             raise e
         finally:
             self._cleanup()
@@ -402,7 +410,7 @@ if __name__ == '__main__':
     lvl = logging.DEBUG if opts.debug else logging.INFO
     logger = logging.getLogger("vncauthproxy")
     logger.setLevel(lvl)
-    formatter = logging.Formatter("%(asctime)s vncauthproxy[%(process)d] %(levelname)s: %(message)s",
+    formatter = logging.Formatter("%(asctime)s %(module)s[%(process)d] %(levelname)s: %(message)s",
         "%Y-%m-%d %H:%M:%S")
     handler = logging.FileHandler(opts.log_file)
     handler.setFormatter(formatter)
@@ -492,7 +500,7 @@ if __name__ == '__main__':
                 password = req['password']
             except Exception, e:
                 logger.warn("Malformed request: %s" % buf)
-                cliend.send(json.dumps(response))
+                client.send(json.dumps(response))
                 client.close()
                 continue
             
@@ -524,13 +532,18 @@ if __name__ == '__main__':
             except socket.error, msg:
                 logger.error("FAILED forwarding [%d (req'd by client: %d) -> %s:%d]" %
                     (sport, sport_orig, daddr, dport))
+                if not pool is None:
+                    pool.append(sport)
+                    logger.debug("Returned port %d to port pool, contains %d ports",
+                        sport, len(pool))
             finally:
                 client.send(json.dumps(response))
                 client.close()
-
+        except Exception, e:
+            logger.exception(e)
+            continue
         except SystemExit:
             break
-
  
     logger.info("Unlinking control socket at %s" %
                  opts.ctrl_socket)
