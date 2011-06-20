@@ -48,6 +48,8 @@ from signal import SIGINT, SIGTERM
 from gevent import signal
 from gevent.select import select
 
+logger = None
+
 class VncAuthProxy(gevent.Greenlet):
     """
     Simple class implementing a VNC Forwarder with MITM authentication as a
@@ -412,6 +414,8 @@ def main():
     
     # Initialize logger
     lvl = logging.DEBUG if opts.debug else logging.INFO
+
+    global logger
     logger = logging.getLogger("vncauthproxy")
     logger.setLevel(lvl)
     formatter = logging.Formatter("%(asctime)s %(module)s[%(process)d] %(levelname)s: %(message)s",
