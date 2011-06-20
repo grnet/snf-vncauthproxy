@@ -16,7 +16,10 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 DAEMON=/usr/sbin/vncauthproxy
 NAME="vncauthproxy"
 DESC="VNC authentication proxy"
-PIDFILE=/var/run/$NAME/$NAME.pid
+RUNDIR=/var/run/$NAME
+LOGDIR=/var/log/$NAME
+PIDFILE=$RUNDIR/$NAME.pid
+CHUID="nobody:nogroup"
 
 . /lib/lsb/init-functions
 
@@ -24,14 +27,22 @@ test -x $DAEMON || exit 0
 
 DAEMON_OPTS="--pid-file=$PIDFILE"
 
+# Read configuration variable file if it is present
+[ -r /etc/default/$NAME ] && . /etc/default/$NAME
+
 case "$1" in
   start)
+	mkdir -p $RUNDIR
+	chown $CHUID $RUNDIR $LOGDIR
+	chmod 0755 $RUNDIR $LOGDIR
+
 	if pidofproc -p $PIDFILE $DAEMON > /dev/null; then
 		log_failure_msg "Starting $DESC (already started)"
 		exit 0
 	fi
 	log_daemon_msg "Starting $DESC" "$NAME"
 	start-stop-daemon --start --quiet --pidfile $PIDFILE \
+		--chuid $CHUID \
 		--exec $DAEMON -- $DAEMON_OPTS
 	log_end_msg $?
 	;;

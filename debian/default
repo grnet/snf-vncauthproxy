@@ -1,0 +1,2 @@
+# set uid/gid
+#CHUID="nobody:nogroup"
