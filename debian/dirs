@@ -1,0 +1,2 @@
+var/log/vncauthproxy
+var/run/vncauthproxy
