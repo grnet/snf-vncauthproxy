@@ -421,7 +421,7 @@ if __name__ == '__main__':
     # which will otherwise go to /dev/null.
     daemon_context = daemon.DaemonContext(
         pidfile=pidf,
-        umask=0o0022,
+        umask=0022,
         stdout=handler.stream,
         stderr=handler.stream,
         files_preserve=[handler.stream])
