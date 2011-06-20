@@ -446,7 +446,7 @@ def main():
         sys.exit(1)
 
     # TODO: make this tunable? chgrp as well?
-    old_umask = os.umask(0077)
+    old_umask = os.umask(0007)
 
     ctrl = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     ctrl.bind(opts.ctrl_socket)
