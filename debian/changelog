@@ -1,0 +1,5 @@
+vncauthproxy (1.0-1) UNRELEASED; urgency=low
+
+  * Initial release.
+
+ -- Faidon Liambotis <paravoid@debian.org>  Mon, 20 Jun 2011 16:32:06 +0300

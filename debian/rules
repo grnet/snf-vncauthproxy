@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --with python2
+
+override_dh_auto_install:
+	dh_auto_install
+
+	mkdir -p debian/vncauthproxy/usr/sbin
+	-mv debian/vncauthproxy/usr/bin/vncauthproxy.py \
+	    debian/vncauthproxy/usr/sbin/vncauthproxy
+	rmdir debian/vncauthproxy/usr/bin
