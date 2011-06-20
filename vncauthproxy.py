@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 #
-
-# Copyright (c) 2010 GRNET SA
+# Copyright (c) 2010-2011 Greek Research and Technology Network S.A.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,7 +17,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301, USA.
 
-DEFAULT_CTRL_SOCKET = "/tmp/vncproxy.sock"
+DEFAULT_CTRL_SOCKET = "/var/run/vncauthproxy/ctrl.sock"
 DEFAULT_LOG_FILE = "/var/log/vncauthproxy/vncauthproxy.log"
 DEFAULT_PID_FILE = "/var/run/vncauthproxy/vncauthproxy.pid"
 DEFAULT_CONNECT_TIMEOUT = 30

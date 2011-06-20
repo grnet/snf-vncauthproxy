@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 #
-
-# Copyright (c) 2010 GRNET SA
+# Copyright (c) 2010-2011 Greek Research and Technology Network S.A.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,7 +25,7 @@ try:
 except ImportError:
     import json
 
-CTRL_SOCKET = "/tmp/vncproxy.sock"
+CTRL_SOCKET = "/var/run/vncauthproxy/ctrl.sock"
 
 def request_forwarding(sport, daddr, dport, password):
     assert(len(password) > 0)
