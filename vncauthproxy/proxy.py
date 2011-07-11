@@ -212,7 +212,7 @@ class VncAuthProxy(gevent.Greenlet):
             self.error("Wrong response length %d, should be 16" % len(response))
             raise gevent.GreenletExit
 
-        if rfb.check_password(challenge, response, password):
+        if rfb.check_password(challenge, response, self.password):
             self.debug("Authentication successful!")
         else:
             self.warn("Authentication failed")
@@ -292,7 +292,7 @@ class VncAuthProxy(gevent.Greenlet):
     def _run(self):
         try:
             self.log.debug("Waiting for client to connect")
-            rlist, _, _ = select(listeners, [], [], timeout=self.timeout)
+            rlist, _, _ = select(self.listeners, [], [], timeout=self.timeout)
 
             if not rlist:
                 self.info("Timed out, no connection after %d sec" % self.timeout)
