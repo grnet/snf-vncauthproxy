@@ -50,6 +50,20 @@ from gevent.select import select
 
 logger = None
 
+# Currently, gevent uses libevent-dns for asynchornous DNS resolution,
+# which opens a socket upon initialization time. Since we can't get the fd
+# reliably, We have to maintain all file descriptors open (which won't harm
+# anyway)
+
+class AllFilesDaemonContext(daemon.DaemonContext):
+    """DaemonContext class keeping all file descriptors open"""
+    def _get_exclude_file_descriptors(self):
+        class All:
+            def __contains__(self, value):
+                return True
+        return All()
+
+
 class VncAuthProxy(gevent.Greenlet):
     """
     Simple class implementing a VNC Forwarder with MITM authentication as a
@@ -428,7 +442,7 @@ def main():
     # Redirect stdout and stderr to handler.stream to catch
     # early errors in the daemonization process [e.g., pidfile creation]
     # which will otherwise go to /dev/null.
-    daemon_context = daemon.DaemonContext(
+    daemon_context = AllFilesDaemonContext(
         pidfile=pidf,
         umask=0022,
         stdout=handler.stream,
