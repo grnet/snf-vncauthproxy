@@ -1,7 +1,7 @@
 Source: vncauthproxy
 Section: python
 Priority: optional
-Maintainer: Faidon Liambotis <paravoid@debian.org>
+Maintainer: Vangelis Koukis <vkoukis@grnet.gr>
 Build-Depends: debhelper (>= 7.0.50~), python-all (>= 2.5), python-setuptools
 Standards-Version: 3.9.2
 XS-Python-Version: >= 2.5
