@@ -15,5 +15,9 @@ setup(
         'daemon',
         'gevent',
     ],
-    scripts=['vncauthproxy.py'],
+    entry_points={
+        'console_scripts': [
+            'vncauthproxy = vncauthproxy.proxy:main'
+        ]
+    }
 )
