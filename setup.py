@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name="vncauthproxy",
-    version="1.0",
+    version="1.1",
     description="VNC authentication proxy",
     author="Apollon Oikonomopoulos",
     author_email="apollon@noc.grnet.gr",
@@ -12,7 +12,7 @@ setup(
     url="http://code.grnet.gr/projects/vncauthproxy",
     packages=["vncauthproxy"],
     install_requires=[
-        'daemon',
+        'python-daemon',
         'gevent',
     ],
     entry_points={
