@@ -6,7 +6,7 @@
 override_dh_auto_install:
 	dh_auto_install
 
-	mkdir -p debian/vncauthproxy/usr/sbin
-	-mv debian/vncauthproxy/usr/bin/vncauthproxy \
-	    debian/vncauthproxy/usr/sbin/vncauthproxy
-	rmdir debian/vncauthproxy/usr/bin
+	mkdir -p debian/snf-vncauthproxy/usr/sbin
+	-mv debian/snf-vncauthproxy/usr/bin/vncauthproxy \
+	    debian/snf-vncauthproxy/usr/sbin/vncauthproxy
+	rmdir debian/snf-vncauthproxy/usr/bin
