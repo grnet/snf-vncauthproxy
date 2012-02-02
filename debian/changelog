@@ -1,11 +1,5 @@
-vncauthproxy (1.1-1) UNRELEASED; urgency=low
+snf-vncauthproxy (1.1-1) stable; urgency=low
 
-  * new upstream release.
+  * Initial release. Official vncauthproxy + patches
 
- -- Vangelis Koukis <vkoukis@grnet.gr>  Fri, 18 Nov 2011 18:11:37 +0200
-
-vncauthproxy (1.0-1) UNRELEASED; urgency=low
-
-  * Initial release.
-
- -- Faidon Liambotis <paravoid@debian.org>  Mon, 20 Jun 2011 16:32:06 +0300
+ -- Vangelis Koukis <vkoukis@grnet.gr>  Thu, 2 Nov 2011 18:11:37 +0200
