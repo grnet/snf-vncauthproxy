@@ -47,6 +47,7 @@ from gevent import socket
 from signal import SIGINT, SIGTERM
 from gevent import signal
 from gevent.select import select
+from time import sleep
 
 logger = None
 
@@ -80,7 +81,7 @@ class VncAuthProxy(gevent.Greenlet):
     """
     id = 1
 
-    def __init__(self, logger, listeners, pool, daddr, dport, password, connect_timeout):
+    def __init__(self, logger, listeners, pool, daddr, dport, server, password, connect_timeout):
         """
         @type logger: logging.Logger
         @param logger: the logger to use
@@ -92,6 +93,8 @@ class VncAuthProxy(gevent.Greenlet):
         @param daddr: destination address (IPv4, IPv6 or hostname)
         @type dport: int
         @param dport: destination port
+        @type server: socket
+        @param server: VNC server socket
         @type password: str
         @param password: password to request from the client
         @type connect_timeout: int
@@ -109,8 +112,8 @@ class VncAuthProxy(gevent.Greenlet):
         self.pool = pool
         self.daddr = daddr
         self.dport = dport
+        self.server = server
         self.password = password
-        self.server = None
         self.client = None
         self.timeout = connect_timeout
 
@@ -173,7 +176,7 @@ class VncAuthProxy(gevent.Greenlet):
         # No need to close the source and dest sockets here.
         # They are owned by and will be closed by the original greenlet.
 
-    def _handshake(self):
+    def _client_handshake(self):
         """
         Perform handshake/authentication with a connecting client
 
@@ -184,11 +187,8 @@ class VncAuthProxy(gevent.Greenlet):
         4. We send an authentication challenge
         5. Client sends the authentication response
         6. We check the authentication
-        7. We initiate a connection with the backend server and perform basic
-           RFB 3.8 handshake with it.
 
-        Upon return, self.client and self.server are sockets
-        connected to the client and the backend server, respectively.
+        Upon return, self.client socket is connected to the client.
 
         """
         self.client.send(rfb.RFB_VERSION_3_8 + "\n")
@@ -235,73 +235,6 @@ class VncAuthProxy(gevent.Greenlet):
 
         # Accept the authentication
         self.client.send(rfb.to_u32(rfb.RFB_AUTH_SUCCESS))
-
-        # Try to connect to the server
-        tries = 50
-
-        while tries:
-            tries -= 1
-
-            # Initiate server connection
-            for res in socket.getaddrinfo(self.daddr, self.dport, socket.AF_UNSPEC,
-                                          socket.SOCK_STREAM, 0, socket.AI_PASSIVE):
-                af, socktype, proto, canonname, sa = res
-                try:
-                    self.server = socket.socket(af, socktype, proto)
-                except socket.error, msg:
-                    self.server = None
-                    continue
-
-                try:
-                    self.debug("Connecting to %s:%s" % sa[:2])
-                    self.server.connect(sa)
-                    self.debug("Connection to %s:%s successful" % sa[:2])
-                except socket.error, msg:
-                    self.server.close()
-                    self.server = None
-                    continue
-
-                # We succesfully connected to the server
-                tries = 0
-                break
-
-            # Wait and retry
-            gevent.sleep(0.2)
-
-        if self.server is None:
-            self.error("Failed to connect to server")
-            raise gevent.GreenletExit
-
-        version = self.server.recv(1024)
-        if not rfb.check_version(version):
-            self.error("Unsupported RFB version: %s" % version.strip())
-            raise gevent.GreenletExit
-
-        self.server.send(rfb.RFB_VERSION_3_8 + "\n")
-
-        res = self.server.recv(1024)
-        types = rfb.parse_auth_request(res)
-        if not types:
-            self.error("Error handshaking with the server")
-            raise gevent.GreenletExit
-
-        else:
-            self.debug("Supported authentication types: %s" %
-                           " ".join([str(x) for x in types]))
-
-        if rfb.RFB_AUTHTYPE_NONE not in types:
-            self.error("Error, server demands authentication")
-            raise gevent.GreenletExit
-
-        self.server.send(rfb.to_u8(rfb.RFB_AUTHTYPE_NONE))
-
-        # Check authentication response
-        res = self.server.recv(4)
-        res = rfb.from_u32(res)
-
-        if res != 0:
-            self.error("Authentication error")
-            raise gevent.GreenletExit
        
     def _run(self):
         try:
@@ -322,10 +255,8 @@ class VncAuthProxy(gevent.Greenlet):
                     self.listeners.pop().close()
                 break
        
-            # Perform RFB handshake with the client and the backend server.
-            # If all goes as planned, we have two connected sockets,
-            # self.client and self.server.
-            self._handshake()
+            # Perform RFB handshake with the client.
+            self._client_handshake()
 
             # Bridge both connections through two "forwarder" greenlets.
             self.workers = [gevent.spawn(self._forward, self.client, self.server),
@@ -383,6 +314,79 @@ def get_listening_sockets(sport):
             raise msg
     
     return sockets
+
+def perform_server_handshake(daddr, dport):
+    """
+    Initiate a connection with the backend server and perform basic
+    RFB 3.8 handshake with it.
+
+    Returns a socket connected to the backend server.
+
+    """
+    server = None
+    # Try to connect to the server
+    tries = 50
+
+    while tries:
+        tries -= 1
+
+        # Initiate server connection
+        for res in socket.getaddrinfo(daddr, dport, socket.AF_UNSPEC,
+                                      socket.SOCK_STREAM, 0, socket.AI_PASSIVE):
+            af, socktype, proto, canonname, sa = res
+            try:
+                server = socket.socket(af, socktype, proto)
+            except socket.error, msg:
+                server = None
+                continue
+
+            try:
+                logger.debug("Connecting to %s:%s" % sa[:2])
+                server.connect(sa)
+                logger.debug("Connection to %s:%s successful" % sa[:2])
+            except socket.error, msg:
+                server.close()
+                server = None
+                continue
+
+            # We succesfully connected to the server
+            tries = 0
+            break
+
+        # Wait and retry
+        sleep(0.2)
+
+    if server is None:
+        raise Exception("Failed to connect to server")
+
+    version = server.recv(1024)
+    if not rfb.check_version(version):
+        raise Exception("Unsupported RFB version: %s" % version.strip())
+
+    server.send(rfb.RFB_VERSION_3_8 + "\n")
+
+    res = server.recv(1024)
+    types = rfb.parse_auth_request(res)
+    if not types:
+        raise Exception("Error handshaking with the server")
+
+    else:
+        logger.debug("Supported authentication types: %s" %
+                       " ".join([str(x) for x in types]))
+
+    if rfb.RFB_AUTHTYPE_NONE not in types:
+        raise Exception("Error, server demands authentication")
+
+    server.send(rfb.to_u8(rfb.RFB_AUTHTYPE_NONE))
+
+    # Check authentication response
+    res = server.recv(4)
+    res = rfb.from_u32(res)
+
+    if res != 0:
+        raise Exception("Authentication error")
+
+    return server
 
 def parse_arguments(args):
     from optparse import OptionParser
@@ -527,6 +531,7 @@ def main():
                 continue
             
             # Spawn a new Greenlet to service the request.
+            server = None
             try:
                 # If the client has so indicated, pick an ephemeral source port
                 # randomly, and remove it from the port pool.
@@ -539,9 +544,13 @@ def main():
                 else:
                     sport = sport_orig
                     pool = None
+
                 listeners = get_listening_sockets(sport)
+                server = perform_server_handshake(daddr, dport)
+
                 VncAuthProxy.spawn(logger, listeners, pool, daddr, dport,
-                    password, opts.connect_timeout)
+                    server, password, opts.connect_timeout)
+
                 logger.info("New forwarding [%d (req'd by client: %d) -> %s:%d]" %
                     (sport, sport_orig, daddr, dport))
                 response = {
@@ -551,13 +560,16 @@ def main():
             except IndexError:
                 logger.error("FAILED forwarding, out of ports for [req'd by "
                     "client: %d -> %s:%d]" % (sport_orig, daddr, dport))
-            except socket.error, msg:
+            except Exception, msg:
+                logger.error(msg)
                 logger.error("FAILED forwarding [%d (req'd by client: %d) -> %s:%d]" %
                     (sport, sport_orig, daddr, dport))
                 if not pool is None:
                     pool.append(sport)
                     logger.debug("Returned port %d to port pool, contains %d ports",
                         sport, len(pool))
+                if not server is None:
+                    server.close()
             finally:
                 client.send(json.dumps(response))
                 client.close()
