@@ -24,6 +24,8 @@ DEFAULT_CTRL_SOCKET = "/var/run/vncauthproxy/ctrl.sock"
 DEFAULT_LOG_FILE = "/var/log/vncauthproxy/vncauthproxy.log"
 DEFAULT_PID_FILE = "/var/run/vncauthproxy/vncauthproxy.pid"
 DEFAULT_CONNECT_TIMEOUT = 30
+DEFAULT_CONNECT_RETRIES = 3
+DEFAULT_RETRY_WAIT = 0.1
 # Default values per http://www.iana.org/assignments/port-numbers
 DEFAULT_MIN_PORT = 49152 
 DEFAULT_MAX_PORT = 65535
@@ -315,7 +317,7 @@ def get_listening_sockets(sport):
     
     return sockets
 
-def perform_server_handshake(daddr, dport):
+def perform_server_handshake(daddr, dport, tries, retry_wait):
     """
     Initiate a connection with the backend server and perform basic
     RFB 3.8 handshake with it.
@@ -324,8 +326,6 @@ def perform_server_handshake(daddr, dport):
 
     """
     server = None
-    # Try to connect to the server
-    tries = 50
 
     while tries:
         tries -= 1
@@ -354,7 +354,7 @@ def perform_server_handshake(daddr, dport):
             break
 
         # Wait and retry
-        sleep(0.2)
+        sleep(retry_wait)
 
     if server is None:
         raise Exception("Failed to connect to server")
@@ -411,6 +411,13 @@ def parse_arguments(args):
     parser.add_option("-t", "--connect-timeout", dest="connect_timeout",
                       default=DEFAULT_CONNECT_TIMEOUT, type="int", metavar="SECONDS",
                       help="How long to listen for clients to forward")
+    parser.add_option("-r", "--connect-retries", dest="connect_retries",
+                      default=DEFAULT_CONNECT_RETRIES, type="int",
+                      metavar="RETRIES",
+                      help="How many times to try to connect to the server")
+    parser.add_option("-w", "--retry-wait", dest="retry_wait",
+                      default=DEFAULT_RETRY_WAIT, type="float", metavar="SECONDS",
+                      help="How long to wait between retrying to connect to the server")
     parser.add_option("-p", "--min-port", dest="min_port",
                       default=DEFAULT_MIN_PORT, type="int", metavar="MIN_PORT",
                       help="The minimum port to use for automatically-allocated ephemeral ports")
@@ -546,7 +553,8 @@ def main():
                     pool = None
 
                 listeners = get_listening_sockets(sport)
-                server = perform_server_handshake(daddr, dport)
+                server = perform_server_handshake(daddr, dport,
+                    opts.connect_retries, opts.retry_wait)
 
                 VncAuthProxy.spawn(logger, listeners, pool, daddr, dport,
                     server, password, opts.connect_timeout)
