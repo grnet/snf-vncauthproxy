@@ -1,3 +1,9 @@
+snf-vncauthproxy (1.2-1) stable; urgency=high
+
+  * Security fix to prevent users from accessing consoles they didn't own
+
+ -- Stratos Psomadakis <psomas@grnet.gr>  Thu, 22 Mar 2012 22:05:07 +0200
+
 snf-vncauthproxy (1.1-1) stable; urgency=low
 
   * Initial release. Official vncauthproxy + patches
