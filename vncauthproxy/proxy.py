@@ -46,6 +46,7 @@ try:
 except ImportError:
     import json
 
+from lockfile import LockTimeout
 from gevent import socket
 from signal import SIGINT, SIGTERM
 from gevent import signal
@@ -463,12 +464,13 @@ def main():
 
     # Remove any stale PID files, left behind by previous invocations
     if daemon.runner.is_pidfile_stale(pidf):
+        logger.warning("Removing stale PID lock file %s", pidf.path)
         pidf.break_lock()
 
     try:
         daemon_context.open()
-    except daemon.pidlockfile.AlreadyLocked:
-        logger.critical("Failed to lock pidfile %s, another instance running?",
+    except (daemon.pidlockfile.AlreadyLocked, LockTimeout):
+        logger.critical("Failed to lock PID file %s, another instance running?",
                         pidf.path)
         sys.exit(1)
     logger.info("Became a daemon")
