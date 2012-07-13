@@ -27,7 +27,7 @@ DEFAULT_CONNECT_TIMEOUT = 30
 DEFAULT_CONNECT_RETRIES = 3
 DEFAULT_RETRY_WAIT = 0.1
 # Default values per http://www.iana.org/assignments/port-numbers
-DEFAULT_MIN_PORT = 49152 
+DEFAULT_MIN_PORT = 49152
 DEFAULT_MAX_PORT = 65535
 
 import os
@@ -37,9 +37,10 @@ import gevent
 import daemon
 import random
 import daemon.pidlockfile
+import daemon.runner
 
 import rfb
- 
+
 try:
     import simplejson as json
 except ImportError:
@@ -219,7 +220,7 @@ class VncAuthProxy(gevent.Greenlet):
                 self.error("Wrong auth type: %d" % type)
                 self.client.send(rfb.to_u32(rfb.RFB_AUTH_ERROR))
                 raise gevent.GreenletExit
-        
+
         # Generate the challenge
         challenge = os.urandom(16)
         self.client.send(challenge)
@@ -237,7 +238,7 @@ class VncAuthProxy(gevent.Greenlet):
 
         # Accept the authentication
         self.client.send(rfb.to_u32(rfb.RFB_AUTH_SUCCESS))
-       
+
     def _run(self):
         try:
             self.log.debug("Waiting for client to connect")
@@ -256,14 +257,14 @@ class VncAuthProxy(gevent.Greenlet):
                 while self.listeners:
                     self.listeners.pop().close()
                 break
-       
+
             # Perform RFB handshake with the client.
             self._client_handshake()
 
             # Bridge both connections through two "forwarder" greenlets.
             self.workers = [gevent.spawn(self._forward, self.client, self.server),
                 gevent.spawn(self._forward, self.server, self.client)]
-            
+
             # If one greenlet goes, the other has to go too.
             self.workers[0].link(self.workers[1])
             self.workers[1].link(self.workers[0])
@@ -311,10 +312,10 @@ def get_listening_sockets(sport):
                 s.close()
             while sockets:
                 sockets.pop().close()
-            
+
             # Make sure we fail immediately if we cannot get a socket
             raise msg
-    
+
     return sockets
 
 def perform_server_handshake(daddr, dport, tries, retry_wait):
@@ -436,7 +437,7 @@ def main():
     # Create pidfile
     pidf = daemon.pidlockfile.TimeoutPIDLockFile(
         opts.pid_file, 10)
-    
+
     # Initialize logger
     lvl = logging.DEBUG if opts.debug else logging.INFO
 
@@ -459,7 +460,17 @@ def main():
         stdout=handler.stream,
         stderr=handler.stream,
         files_preserve=[handler.stream])
-    daemon_context.open()
+
+    # Remove any stale PID files, left behind by previous invocations
+    if daemon.runner.is_pidfile_stale(pidf):
+        pidf.break_lock()
+
+    try:
+        daemon_context.open()
+    except daemon.pidlockfile.AlreadyLocked:
+        logger.critical("Failed to lock pidfile %s, another instance running?",
+                        pidf.path)
+        sys.exit(1)
     logger.info("Became a daemon")
 
     # A fork() has occured while daemonizing,
@@ -491,13 +502,13 @@ def main():
     gevent.signal(SIGTERM, fatal_signal_handler, "SIGTERM")
 
     # Init ephemeral port pool
-    ports = range(opts.min_port, opts.max_port + 1) 
+    ports = range(opts.min_port, opts.max_port + 1)
 
     while True:
         try:
             client, addr = ctrl.accept()
             logger.info("New control connection")
-           
+
             # Receive and parse a client request.
             response = {
                 "source_port": 0,
@@ -505,7 +516,7 @@ def main():
             }
             try:
                 # TODO: support multiple forwardings in the same message?
-                # 
+                #
                 # Control request, in JSON:
                 #
                 # {
@@ -514,7 +525,7 @@ def main():
                 #     "destination_port": <destination port>
                 #     "password": <the password to use for MITM authentication of clients>
                 # }
-                # 
+                #
                 # The <password> is used for MITM authentication of clients
                 # connecting to <source_port>, who will subsequently be forwarded
                 # to a VNC server at <destination_address>:<destination_port>
@@ -526,7 +537,7 @@ def main():
                 # }
                 buf = client.recv(1024)
                 req = json.loads(buf)
-                
+
                 sport_orig = int(req['source_port'])
                 daddr = req['destination_address']
                 dport = int(req['destination_port'])
@@ -536,7 +547,7 @@ def main():
                 client.send(json.dumps(response))
                 client.close()
                 continue
-            
+
             # Spawn a new Greenlet to service the request.
             server = None
             try:
@@ -586,7 +597,7 @@ def main():
             continue
         except SystemExit:
             break
- 
+
     logger.info("Unlinking control socket at %s" %
                  opts.ctrl_socket)
     os.unlink(opts.ctrl_socket)
