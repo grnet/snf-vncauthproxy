@@ -1,3 +1,9 @@
+snf-vncauthproxy (1.3-1) stable; urgency=high
+
+  * Remove stale PID lockfiles
+
+ -- Vangelis Koukis <vkoukis@grnet.gr>  Fri, 13 Jul 2012 15:56:38 +0200
+
 snf-vncauthproxy (1.2-1) stable; urgency=high
 
   * Security fix to prevent users from accessing consoles they didn't own
