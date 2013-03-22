@@ -27,6 +27,7 @@ except ImportError:
 
 CTRL_SOCKET = "/var/run/vncauthproxy/ctrl.sock"
 
+
 def request_forwarding(sport, daddr, dport, password):
     assert(len(password) > 0)
     req = {
