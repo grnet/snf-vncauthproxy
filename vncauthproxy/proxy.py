@@ -36,7 +36,6 @@ import logging
 import gevent
 import daemon
 import random
-import daemon.pidlockfile
 import daemon.runner
 
 import rfb
@@ -46,11 +45,18 @@ try:
 except ImportError:
     import json
 
-from lockfile import LockTimeout
 from gevent import socket
 from signal import SIGINT, SIGTERM
 from gevent.select import select
 from time import sleep
+
+from lockfile import LockTimeout, AlreadyLocked
+# Take care of differences between python-daemon versions.
+try:
+    from daemon import pidfile as pidlockfile
+except:
+    from daemon import pidlockfile
+
 
 logger = None
 
@@ -451,8 +457,7 @@ def main():
     (opts, args) = parse_arguments(sys.argv[1:])
 
     # Create pidfile
-    pidf = daemon.pidlockfile.TimeoutPIDLockFile(
-        opts.pid_file, 10)
+    pidf = pidlockfile.TimeoutPIDLockFile(opts.pid_file, 10)
 
     # Initialize logger
     lvl = logging.DEBUG if opts.debug else logging.INFO
@@ -485,7 +490,7 @@ def main():
 
     try:
         daemon_context.open()
-    except (daemon.pidlockfile.AlreadyLocked, LockTimeout):
+    except (AlreadyLocked, LockTimeout):
         logger.critical(("Failed to lock PID file %s, another instance "
                          "running?"), pidf.path)
         sys.exit(1)
