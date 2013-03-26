@@ -25,11 +25,56 @@ try:
 except ImportError:
     import json
 
-CTRL_SOCKET = "/var/run/vncauthproxy/ctrl.sock"
+DEFAULT_CTRL_SOCKET = "/var/run/vncauthproxy/ctrl.sock"
 
 
-def request_forwarding(sport, daddr, dport, password):
-    assert(len(password) > 0)
+def parse_arguments(args):
+    from optparse import OptionParser
+
+    parser = OptionParser()
+    parser.add_option("-c", "--socket", dest="ctrl_socket",
+                      default=DEFAULT_CTRL_SOCKET,
+                      metavar="PATH",
+                      help=("UNIX socket for connecting to vncauthproxy "
+                            "(default: %s)" % DEFAULT_CTRL_SOCKET))
+    parser.add_option('-s', dest="sport",
+                      default=0, type="int",
+                      metavar='PORT',
+                      help=("Use source port PORT for incoming connections "
+                            "(default: allocate a port automatically)"))
+    parser.add_option("-d", "--dest",
+                      default=None, dest="daddr",
+                      metavar="HOST",
+                      help="Proxy connection to destination host HOST")
+    parser.add_option("-p", "--dport", dest="dport",
+                      default=None, type="int",
+                      metavar="PORT",
+                      help="Proxy connection to destination port PORT")
+    parser.add_option("-P", "--password", dest="password",
+                      default=None,
+                      metavar="PASSWORD",
+                      help=("Use password PASSWD to authenticate incoming "
+                            "VNC connections"))
+
+    (opts, args) = parser.parse_args(args)
+
+    # Mandatory arguments
+    if not opts.password:
+        parser.error("The -P/--password argument is mandatory.")
+    if not opts.daddr:
+        parser.error("The -d/--dest argument is mandatory.")
+    if not opts.dport:
+        parser.error("The -p/--dport argument is mandatory.")
+
+    return (opts, args)
+
+
+def request_forwarding(sport, daddr, dport, password,
+                       ctrl_socket=DEFAULT_CTRL_SOCKET):
+    """Connect to vncauthproxy and request a VNC forwarding."""
+    if not password:
+        raise ValueError("You must specify a non-empty password")
+
     req = {
         "source_port": int(sport),
         "destination_address": daddr,
@@ -38,15 +83,25 @@ def request_forwarding(sport, daddr, dport, password):
     }
 
     ctrl = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    ctrl.connect(CTRL_SOCKET)
+    ctrl.connect(ctrl_socket)
     ctrl.send(json.dumps(req))
 
     response = ctrl.recv(1024)
     res = json.loads(response)
     return res
 
+
 if __name__ == '__main__':
-    res = request_forwarding(*sys.argv[1:])
+    (opts, args) = parse_arguments(sys.argv[1:])
+
+    res = request_forwarding(sport=opts.sport, daddr=opts.daddr,
+                             dport=opts.dport, password=opts.password,
+                             ctrl_socket=opts.ctrl_socket)
+
+    sys.stderr.write("Forwaring %s -> %s:%s: %s\n" % (res['source_port'],
+                                                      opts.daddr, opts.dport,
+                                                      res['status']))
+
     if res['status'] == "OK":
         sys.exit(0)
     else:
