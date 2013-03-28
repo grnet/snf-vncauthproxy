@@ -251,7 +251,9 @@ class VncAuthProxy(gevent.Greenlet):
 
     def _run(self):
         try:
-            self.log.debug("Waiting for client to connect")
+            self.info(("Waiting for a client to connect at %s" %
+                       ", ".join(["%s:%d" % s.getsockname()[:2]
+                                  for s in self.listeners])))
             rlist, _, _ = select(self.listeners, [], [], timeout=self.timeout)
 
             if not rlist:
