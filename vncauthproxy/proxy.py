@@ -133,8 +133,8 @@ class VncAuthProxy(gevent.Greenlet):
         # the port pool, if applicable.
         if not self.pool is None:
             self.pool.append(self.sport)
-            self.log.debug(("Returned port %d to port pool, contains %d ports",
-                            self.sport, len(self.pool)))
+            self.debug("Returned port %d to port pool, contains %d ports",
+                       self.sport, len(self.pool))
 
         while self.listeners:
             self.listeners.pop().close()
@@ -144,21 +144,6 @@ class VncAuthProxy(gevent.Greenlet):
             self.client.close()
 
         raise gevent.GreenletExit
-
-    def info(self, msg):
-        self.log.info("[C%d] %s" % (self.id, msg))
-
-    def debug(self, msg):
-        self.log.debug("[C%d] %s" % (self.id, msg))
-
-    def warn(self, msg):
-        self.log.warn("[C%d] %s" % (self.id, msg))
-
-    def error(self, msg):
-        self.log.error("[C%d] %s" % (self.id, msg))
-
-    def critical(self, msg):
-        self.log.critical("[C%d] %s" % (self.id, msg))
 
     def __str__(self):
         return "VncAuthProxy: %d -> %s:%d" % (self.sport, self.daddr,
@@ -207,7 +192,7 @@ class VncAuthProxy(gevent.Greenlet):
         client_version_str = self.client.recv(1024)
         client_version = rfb.check_version(client_version_str)
         if not client_version:
-            self.error("Invalid version: %s" % client_version_str)
+            self.error("Invalid version: %s", client_version_str)
             raise gevent.GreenletExit
 
         # Both for RFB 3.3 and 3.8
@@ -221,12 +206,12 @@ class VncAuthProxy(gevent.Greenlet):
             res = self.client.recv(1024)
             type = rfb.parse_client_authtype(res)
             if type == rfb.RFB_AUTHTYPE_ERROR:
-                self.warn("Client refused authentication: %s" % res[1:])
+                self.warn("Client refused authentication: %s", res[1:])
             else:
-                self.debug("Client requested authtype %x" % type)
+                self.debug("Client requested authtype %x", type)
 
             if type != rfb.RFB_AUTHTYPE_VNC:
-                self.error("Wrong auth type: %d" % type)
+                self.error("Wrong auth type: %d", type)
                 self.client.send(rfb.to_u32(rfb.RFB_AUTH_ERROR))
                 raise gevent.GreenletExit
 
@@ -235,12 +220,11 @@ class VncAuthProxy(gevent.Greenlet):
         self.client.send(challenge)
         response = self.client.recv(1024)
         if len(response) != 16:
-            self.error(("Wrong response length %d, should be 16" %
-                        len(response)))
+            self.error("Wrong response length %d, should be 16", len(response))
             raise gevent.GreenletExit
 
         if rfb.check_password(challenge, response, self.password):
-            self.debug("Authentication successful!")
+            self.debug("Authentication successful")
         else:
             self.warn("Authentication failed")
             self.client.send(rfb.to_u32(rfb.RFB_AUTH_ERROR))
@@ -251,19 +235,19 @@ class VncAuthProxy(gevent.Greenlet):
 
     def _run(self):
         try:
-            self.info(("Waiting for a client to connect at %s" %
-                       ", ".join(["%s:%d" % s.getsockname()[:2]
-                                  for s in self.listeners])))
+            self.info("Waiting for a client to connect at %s",
+                      ", ".join(["%s:%d" % s.getsockname()[:2]
+                                 for s in self.listeners]))
             rlist, _, _ = select(self.listeners, [], [], timeout=self.timeout)
 
             if not rlist:
-                self.info(("Timed out, no connection after %d sec" %
-                           self.timeout))
+                self.info("Timed out, no connection after %d sec",
+                          self.timeout)
                 raise gevent.GreenletExit
 
             for sock in rlist:
                 self.client, addrinfo = sock.accept()
-                self.info("Connection from %s:%d" % addrinfo[:2])
+                self.info("Connection from %s:%d", addrinfo[:2])
 
                 # Close all listening sockets, we only want a one-shot
                 # connection from a single client.
@@ -290,14 +274,25 @@ class VncAuthProxy(gevent.Greenlet):
             # Any unhandled exception in the previous block
             # is an error and must be logged accordingly
             if not isinstance(e, gevent.GreenletExit):
-                self.log.exception(e)
+                self.exception(e)
             raise e
         finally:
             self._cleanup()
 
+# Logging support inside VncAuthproxy
+# Wrap all common logging functions in logging-specific methods
+for funcname in ["info", "debug", "warn", "error", "critical",
+                 "exception"]:
+    def gen(funcname):
+        def wrapped_log_func(self, *args, **kwargs):
+            func = getattr(self.log, funcname)
+            func("[C%d] %s" % (self.id, args[0]), *args[1:], **kwargs)
+        return wrapped_log_func
+    setattr(VncAuthProxy, funcname, gen(funcname))
+
 
 def fatal_signal_handler(signame):
-    logger.info("Caught %s, will raise SystemExit" % signame)
+    logger.info("Caught %s, will raise SystemExit", signame)
     raise SystemExit
 
 
@@ -320,10 +315,9 @@ def get_listening_sockets(sport):
             s.bind(sa)
             s.listen(1)
             sockets.append(s)
-            logger.debug("Listening on %s:%d" % sa[:2])
+            logger.debug("Listening on %s:%d", sa[:2])
         except socket.error, msg:
-            logger.error(("Error binding to %s:%d: %s" %
-                          (sa[0], sa[1], msg[1])))
+            logger.error("Error binding to %s:%d: %s", sa[0], sa[1], msg[1])
             if s:
                 s.close()
             while sockets:
@@ -360,9 +354,9 @@ def perform_server_handshake(daddr, dport, tries, retry_wait):
                 continue
 
             try:
-                logger.debug("Connecting to %s:%s" % sa[:2])
+                logger.debug("Connecting to %s:%s", sa[:2])
                 server.connect(sa)
-                logger.debug("Connection to %s:%s successful" % sa[:2])
+                logger.debug("Connection to %s:%s successful", sa[:2])
             except socket.error:
                 server.close()
                 server = None
@@ -390,8 +384,8 @@ def perform_server_handshake(daddr, dport, tries, retry_wait):
         raise Exception("Error handshaking with the server")
 
     else:
-        logger.debug(("Supported authentication types: %s" %
-                      " ".join([str(x) for x in types])))
+        logger.debug("Supported authentication types: %s",
+                     " ".join([str(x) for x in types]))
 
     if rfb.RFB_AUTHTYPE_NONE not in types:
         raise Exception("Error, server demands authentication")
