@@ -61,7 +61,7 @@ except:
 logger = None
 
 
-# Currently, gevent uses libevent-dns for asynchornous DNS resolution,
+# Currently, gevent uses libevent-dns for asynchronous DNS resolution,
 # which opens a socket upon initialization time. Since we can't get the fd
 # reliably, We have to maintain all file descriptors open (which won't harm
 # anyway)
