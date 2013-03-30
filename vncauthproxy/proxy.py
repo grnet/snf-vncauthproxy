@@ -144,13 +144,6 @@ class VncAuthProxy(gevent.Greenlet):
         gevent.joinall(self.workers)
         del self.workers
 
-        # Reintroduce the port number of the client socket in
-        # the port pool, if applicable.
-        if not self.pool is None:
-            self.pool.append(self.sport)
-            self.debug("Returned port %d to port pool, contains %d ports",
-                       self.sport, len(self.pool))
-
         self.debug("Cleaning up sockets")
         while self.listeners:
             self.listeners.pop().close()
@@ -158,6 +151,13 @@ class VncAuthProxy(gevent.Greenlet):
             self.server.close()
         if self.client:
             self.client.close()
+
+        # Reintroduce the port number of the client socket in
+        # the port pool, if applicable.
+        if not self.pool is None:
+            self.pool.append(self.sport)
+            self.debug("Returned port %d to port pool, contains %d ports",
+                       self.sport, len(self.pool))
 
         self.info("Cleaned up connection, all done")
         raise gevent.GreenletExit
