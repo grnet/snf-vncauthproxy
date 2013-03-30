@@ -48,7 +48,6 @@ except ImportError:
 from gevent import socket
 from signal import SIGINT, SIGTERM
 from gevent.select import select
-from time import sleep
 
 from lockfile import LockTimeout, AlreadyLocked
 # Take care of differences between python-daemon versions.
@@ -367,7 +366,7 @@ def perform_server_handshake(daddr, dport, tries, retry_wait):
             break
 
         # Wait and retry
-        sleep(retry_wait)
+        gevent.sleep(retry_wait)
 
     if server is None:
         raise Exception("Failed to connect to server")
