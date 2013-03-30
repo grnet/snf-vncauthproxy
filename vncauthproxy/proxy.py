@@ -246,7 +246,7 @@ class VncAuthProxy(gevent.Greenlet):
 
             for sock in rlist:
                 self.client, addrinfo = sock.accept()
-                self.info("Connection from %s:%d", addrinfo[:2])
+                self.info("Connection from %s:%d", *addrinfo[:2])
 
                 # Close all listening sockets, we only want a one-shot
                 # connection from a single client.
@@ -314,7 +314,7 @@ def get_listening_sockets(sport):
             s.bind(sa)
             s.listen(1)
             sockets.append(s)
-            logger.debug("Listening on %s:%d", sa[:2])
+            logger.debug("Listening on %s:%d", *sa[:2])
         except socket.error, msg:
             logger.error("Error binding to %s:%d: %s", sa[0], sa[1], msg[1])
             if s:
@@ -353,9 +353,9 @@ def perform_server_handshake(daddr, dport, tries, retry_wait):
                 continue
 
             try:
-                logger.debug("Connecting to %s:%s", sa[:2])
+                logger.debug("Connecting to %s:%s", *sa[:2])
                 server.connect(sa)
-                logger.debug("Connection to %s:%s successful", sa[:2])
+                logger.debug("Connection to %s:%s successful", *sa[:2])
             except socket.error:
                 server.close()
                 server = None
@@ -447,7 +447,7 @@ def parse_arguments(args):
 
 
 def main():
-    """Run the daemon from the command line."""
+    """Run the daemon from the command line"""
 
     (opts, args) = parse_arguments(sys.argv[1:])
 
@@ -496,7 +496,7 @@ def main():
     gevent.reinit()
 
     if os.path.exists(opts.ctrl_socket):
-        logger.critical("Socket '%s' already exists" % opts.ctrl_socket)
+        logger.critical("Socket '%s' already exists", opts.ctrl_socket)
         sys.exit(1)
 
     # TODO: make this tunable? chgrp as well?
@@ -508,8 +508,8 @@ def main():
     os.umask(old_umask)
 
     ctrl.listen(1)
-    logger.info(("Initialized, waiting for control connections at %s" %
-                 opts.ctrl_socket))
+    logger.info("Initialized, waiting for control connections at %s",
+                opts.ctrl_socket)
 
     # Catch signals to ensure graceful shutdown,
     # e.g., to make sure the control socket gets unlink()ed.
@@ -567,7 +567,7 @@ def main():
                 dport = int(req['destination_port'])
                 password = req['password']
             except Exception, e:
-                logger.warn("Malformed request: %s" % buf)
+                logger.warn("Malformed request: %s", buf)
                 client.send(json.dumps(response))
                 client.close()
                 continue
@@ -580,8 +580,8 @@ def main():
                 if sport_orig == 0:
                     sport = random.choice(ports)
                     ports.remove(sport)
-                    logger.debug(("Got port %d from pool, %d remaining",
-                                  sport, len(ports)))
+                    logger.debug("Got port %d from pool, %d remaining",
+                                 sport, len(ports))
                     pool = ports
                 else:
                     sport = sport_orig
@@ -595,22 +595,22 @@ def main():
                 VncAuthProxy.spawn(logger, listeners, pool, daddr, dport,
                                    server, password, opts.connect_timeout)
 
-                logger.info(("New forwarding: %d (client req'd: %d) -> %s:%d" %
-                             (sport, sport_orig, daddr, dport)))
+                logger.info("New forwarding: %d (client req'd: %d) -> %s:%d",
+                            sport, sport_orig, daddr, dport)
                 response = {"source_port": sport,
                             "status": "OK"}
             except IndexError:
                 logger.error(("FAILED forwarding, out of ports for [req'd by "
-                              "client: %d -> %s:%d]" % (sport_orig, daddr,
-                                                        dport)))
+                              "client: %d -> %s:%d]"),
+                             sport_orig, daddr, dport)
             except Exception, msg:
                 logger.error(msg)
                 logger.error(("FAILED forwarding: %d (client req'd: %d) -> "
-                              "%s:%d" % (sport, sport_orig, daddr, dport)))
+                              "%s:%d"), sport, sport_orig, daddr, dport)
                 if not pool is None:
                     pool.append(sport)
-                    logger.debug(("Returned port %d to pool, %d remanining",
-                                  sport, len(pool)))
+                    logger.debug("Returned port %d to pool, %d remanining",
+                                 sport, len(pool))
                 if not server is None:
                     server.close()
             finally:
@@ -622,7 +622,7 @@ def main():
         except SystemExit:
             break
 
-    logger.info("Unlinking control socket at %s" % opts.ctrl_socket)
+    logger.info("Unlinking control socket at %s", opts.ctrl_socket)
     os.unlink(opts.ctrl_socket)
     daemon_context.close()
     sys.exit(0)
