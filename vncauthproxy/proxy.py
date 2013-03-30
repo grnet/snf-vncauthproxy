@@ -34,6 +34,7 @@ import os
 import sys
 import logging
 import gevent
+import gevent.event
 import daemon
 import random
 import daemon.runner
@@ -116,6 +117,8 @@ class VncAuthProxy(gevent.Greenlet):
         VncAuthProxy.id += 1
         self.log = logger
         self.listeners = listeners
+        # A list of worker/forwarder greenlets, one for each direction
+        self.workers = []
         # All listening sockets are assumed to be on the same port
         self.sport = listeners[0].getsockname()[1]
         self.pool = pool
@@ -127,7 +130,20 @@ class VncAuthProxy(gevent.Greenlet):
         self.timeout = connect_timeout
 
     def _cleanup(self):
-        """Close all active sockets and exit gracefully"""
+        """Cleanup everything: workers, sockets, ports
+
+        Kill all remaining forwarder greenlets, close all active sockets,
+        return the source port to the pool if applicable, then exit
+        gracefully.
+
+        """
+        # Make sure all greenlets are dead, then clean them up
+        self.debug("Cleaning up %d workers", len(self.workers))
+        for g in self.workers:
+            g.kill()
+        gevent.joinall(self.workers)
+        del self.workers
+
         # Reintroduce the port number of the client socket in
         # the port pool, if applicable.
         if not self.pool is None:
@@ -135,6 +151,7 @@ class VncAuthProxy(gevent.Greenlet):
             self.debug("Returned port %d to port pool, contains %d ports",
                        self.sport, len(self.pool))
 
+        self.debug("Cleaning up sockets")
         while self.listeners:
             self.listeners.pop().close()
         if self.server:
@@ -142,6 +159,7 @@ class VncAuthProxy(gevent.Greenlet):
         if self.client:
             self.client.close()
 
+        self.info("Cleaned up connection, all done")
         raise gevent.GreenletExit
 
     def __str__(self):
@@ -258,16 +276,32 @@ class VncAuthProxy(gevent.Greenlet):
             self._client_handshake()
 
             # Bridge both connections through two "forwarder" greenlets.
-            self.workers = [gevent.spawn(self._forward,
-                                         self.client, self.server),
-                            gevent.spawn(self._forward,
-                                         self.server, self.client)]
+            # This greenlet will wait until any of the workers dies.
+            # Final cleanup will take place in _cleanup().
+            dead = gevent.event.Event()
+            dead.clear()
 
-            # If one greenlet goes, the other has to go too.
-            self.workers[0].link(self.workers[1])
-            self.workers[1].link(self.workers[0])
-            gevent.joinall(self.workers)
-            del self.workers
+            # This callback will get called if any of the two workers dies.
+            def callback(g):
+                self.debug("Worker %d/%d died", self.workers.index(g),
+                           len(self.workers))
+                dead.set()
+
+            self.workers.append(gevent.spawn(self._forward,
+                                             self.client, self.server))
+            self.workers.append(gevent.spawn(self._forward,
+                                             self.server, self.client))
+            for g in self.workers:
+                g.link(callback)
+
+            # Wait until any of the workers dies
+            self.debug("Waiting for any of %d workers to die",
+                       len(self.workers))
+            dead.wait()
+
+            # We can go now, _cleanup() will take care of
+            # all worker, socket and port cleanup
+            self.debug("A forwarder died, our work here is done")
             raise gevent.GreenletExit
         except Exception, e:
             # Any unhandled exception in the previous block
