@@ -13,8 +13,11 @@ set -e
 # Update version
 devflow-update-version
 
-for project in $PROJECTS; do
-  cd $project
-  python setup.py develop $OPTIONS
-  cd -
-done
+#for project in $PROJECTS; do
+#  cd $project
+#  python setup.py develop $OPTIONS
+#  cd -
+# done
+
+# There is a single setup.py for the time being
+python setup.py develop $OPTIONS
