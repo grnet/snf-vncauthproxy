@@ -1,7 +1,4 @@
-#
-#
-
-# Copyright (c) 2010 GRNET SA
+# Copyright (c) 2010-2013 GRNET SA
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,14 +27,14 @@ RFB_SUPPORTED_AUTHTYPES = [RFB_AUTHTYPE_NONE, RFB_AUTHTYPE_VNC]
 RFB_VERSION_3_8 = "RFB 003.008"
 RFB_VERSION_3_7 = "RFB 003.007"
 RFB_VERSION_3_3 = "RFB 003.003"
-RFB_VALID_VERSIONS = [
-    RFB_VERSION_3_3,
-#    RFB_VERSION_3_7,
-    RFB_VERSION_3_8,
-]
+RFB_VALID_VERSIONS = [RFB_VERSION_3_3,
+                      # RFB_VERSION_3_7,
+                      RFB_VERSION_3_8]
+
 
 class RfbError(Exception):
     pass
+
 
 def check_version(version):
     if version.strip()[:11] in RFB_VALID_VERSIONS:
@@ -45,12 +42,13 @@ def check_version(version):
     else:
         return None
 
+
 def make_auth_request(*args, **kwargs):
     auth_methods = args
     version = kwargs['version']
     if version == RFB_VERSION_3_3:
         if len(auth_methods) != 1:
-            raise RfbError("Only single authentication type may be specified for RFB 3.3")
+            raise RfbError("Only one auth type may be specified for RFB 3.3")
     auth_methods = set(auth_methods)
     for method in auth_methods:
         if method not in RFB_SUPPORTED_AUTHTYPES:
@@ -58,7 +56,9 @@ def make_auth_request(*args, **kwargs):
     if version == RFB_VERSION_3_3:
         return pack('>I', *auth_methods)
     else:
-        return pack('B' + 'B' * len(auth_methods), len(auth_methods), *auth_methods)
+        return pack('B' + 'B' * len(auth_methods), len(auth_methods),
+                    *auth_methods)
+
 
 def parse_auth_request(request):
     length = unpack('B', request[0])[0]
@@ -66,21 +66,27 @@ def parse_auth_request(request):
         return []
     return unpack('B' * length, request[1:])
 
+
 def parse_client_authtype(authtype):
     return unpack('B', authtype[0])[0]
+
 
 def from_u32(val):
     return unpack('>L', val)[0]
 
+
 def to_u32(val):
     return pack('>L', val)
+
 
 def from_u8(val):
     return unpack('B', val)[0]
 
+
 def to_u8(val):
     return pack('B', val)
 
+
 def check_password(challenge, response, password):
-    return d3des.generate_response((password + '\0' * 8 )[:8],
+    return d3des.generate_response((password + '\0' * 8)[:8],
                                    challenge) == response
