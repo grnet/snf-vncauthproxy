@@ -11,7 +11,7 @@ set -e
 . ./ci/config
 
 # Update version
-python update_version.py
+devflow-update-version
 
 for project in $PROJECTS; do
   cd $project
