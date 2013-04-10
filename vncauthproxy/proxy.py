@@ -26,9 +26,14 @@ DEFAULT_PID_FILE = "/var/run/vncauthproxy/vncauthproxy.pid"
 DEFAULT_CONNECT_TIMEOUT = 30
 DEFAULT_CONNECT_RETRIES = 3
 DEFAULT_RETRY_WAIT = 0.1
-# Default values per http://www.iana.org/assignments/port-numbers
-DEFAULT_MIN_PORT = 49152
-DEFAULT_MAX_PORT = 65535
+# We must take care not to fall into the ephemeral port range,
+# this can lead to transient failures to bind a chosen port.
+#
+# By default, Linux uses 32768 to 61000, see:
+# http://www.ncftp.com/ncftpd/doc/misc/ephemeral_ports.html#Linux
+# so 25000-30000 seems to be a sensible default.
+DEFAULT_MIN_PORT = 25000
+DEFAULT_MAX_PORT = 30000
 
 import os
 import sys
