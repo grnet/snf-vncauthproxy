@@ -1,2 +1,4 @@
 # set uid/gid
 #CHUID="nobody:nogroup"
+# Arguments passed to vncauthproxy
+#DAEMON_OPTS="--pid-file=$PIDFILE"
