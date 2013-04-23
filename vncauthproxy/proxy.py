@@ -20,7 +20,8 @@ vncauthproxy - a VNC authentication proxy
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301, USA.
 
-DEFAULT_CTRL_SOCKET = "/var/run/vncauthproxy/ctrl.sock"
+DEFAULT_BIND_ADDRESS = None
+DEFAULT_LPORT = 24999
 DEFAULT_LOG_FILE = "/var/log/vncauthproxy/vncauthproxy.log"
 DEFAULT_PID_FILE = "/var/run/vncauthproxy/vncauthproxy.pid"
 DEFAULT_CONNECT_TIMEOUT = 30
@@ -453,11 +454,14 @@ def parse_arguments(args):
     from optparse import OptionParser
 
     parser = OptionParser()
-    parser.add_option("-s", "--socket", dest="ctrl_socket",
-                      default=DEFAULT_CTRL_SOCKET,
-                      metavar="PATH",
-                      help=("UNIX socket for control connections (default: "
-                            "%s" % DEFAULT_CTRL_SOCKET))
+    parser.add_option("--bind", dest="bind_address",
+                      default=DEFAULT_BIND_ADDRESS,
+                      metavar="ADDRESS",
+                      help=("Address to listen for control connections"))
+    parser.add_option( "--lport", dest="lport",
+                      default=DEFAULT_LPORT,
+                      metavar="LPORT",
+                      help=("Port to listen for control connections"))
     parser.add_option("-d", "--debug", action="store_true", dest="debug",
                       help="Enable debugging information")
     parser.add_option("-l", "--log", dest="log_file",
@@ -648,21 +652,31 @@ def main():
     # we *must* reinit gevent
     gevent.reinit()
 
-    if os.path.exists(opts.ctrl_socket):
-        logger.critical("Socket '%s' already exists", opts.ctrl_socket)
-        sys.exit(1)
+    sockets = []
+    for res in socket.getaddrinfo(opts.bind_address, opts.lport,
+                             socket.AF_UNSPEC, socket.SOCK_STREAM, 0,
+                             socket.AI_PASSIVE):
+        af, socktype, proto, canonname, sa = res
+        try:
+            s = None
+            s = socket.socket(af, socktype, proto)
+            if af == socket.AF_INET6:
+                # Bind v6 only when AF_INET6, otherwise either v4 or v6 bind
+                # will fail.
+                s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            s.bind(sa)
+            s.listen(opts.backlog)
+            sockets.append(s)
+            logger.info("Control socket listening on %s:%d", *sa[:2])
+        except socket.error, msg:
+            logger.critical("Error binding control socket to %s:%d: %s",
+                         sa[0], sa[1], msg[1])
+            if s:
+                s.close()
+            while sockets:
+                sockets.pop.close()
 
-    # TODO: make this tunable? chgrp as well?
-    old_umask = os.umask(0007)
-
-    ctrl = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    ctrl.bind(opts.ctrl_socket)
-
-    os.umask(old_umask)
-
-    ctrl.listen(opts.backlog)
-    logger.info("Initialized, waiting for control connections at %s",
-                opts.ctrl_socket)
+            sys.exit(1)
 
     # Catch signals to ensure graceful shutdown,
     # e.g., to make sure the control socket gets unlink()ed.
@@ -677,18 +691,21 @@ def main():
 
     while True:
         try:
-            client, addr = ctrl.accept()
-            logger.info("New control connection")
+            rlist, _, _ = select(sockets, [], [])
+            for ctrl in rlist:
+                client, addr = ctrl.accept()
+                logger.info("New control connection")
 
-            gevent.Greenlet.spawn(establish_connection, client, addr,
-                                  ports, opts)
+                gevent.Greenlet.spawn(establish_connection, client, addr,
+                                      ports, opts)
         except Exception, e:
             logger.exception(e)
             continue
         except SystemExit:
             break
 
-    logger.info("Unlinking control socket at %s", opts.ctrl_socket)
-    os.unlink(opts.ctrl_socket)
+    logger.info("Closing control sockets")
+    while sockets:
+        sockets.pop.close()
     daemon_context.close()
     sys.exit(0)
