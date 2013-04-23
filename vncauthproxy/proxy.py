@@ -26,6 +26,8 @@ DEFAULT_PID_FILE = "/var/run/vncauthproxy/vncauthproxy.pid"
 DEFAULT_CONNECT_TIMEOUT = 30
 DEFAULT_CONNECT_RETRIES = 3
 DEFAULT_RETRY_WAIT = 0.1
+DEFAULT_BACKLOG = 256
+DEFAULT_SOCK_TIMEOUT = 60.0
 # We must take care not to fall into the ephemeral port range,
 # this can lead to transient failures to bind a chosen port.
 #
@@ -321,6 +323,7 @@ class VncAuthProxy(gevent.Greenlet):
 # Wrap all common logging functions in logging-specific methods
 for funcname in ["info", "debug", "warn", "error", "critical",
                  "exception"]:
+
     def gen(funcname):
         def wrapped_log_func(self, *args, **kwargs):
             func = getattr(self.log, funcname)
@@ -367,7 +370,7 @@ def get_listening_sockets(sport):
     return sockets
 
 
-def perform_server_handshake(daddr, dport, tries, retry_wait):
+def perform_server_handshake(daddr, dport, tries, retry_wait, sock_timeout):
     """
     Initiate a connection with the backend server and perform basic
     RFB 3.8 handshake with it.
@@ -390,6 +393,9 @@ def perform_server_handshake(daddr, dport, tries, retry_wait):
             except socket.error:
                 server = None
                 continue
+
+            # Set socket timeout for the initial handshake
+            server.settimeout(sock_timeout)
 
             try:
                 logger.debug("Connecting to %s:%s", *sa[:2])
@@ -437,6 +443,9 @@ def perform_server_handshake(daddr, dport, tries, retry_wait):
     if res != 0:
         raise Exception("Authentication error")
 
+    # Reset the timeout for the rest of the session
+    server.settimeout(None)
+
     return server
 
 
@@ -481,8 +490,113 @@ def parse_arguments(args):
                       default=DEFAULT_MAX_PORT, type="int", metavar="MAX_PORT",
                       help=("The maximum port number to use for automatically-"
                             "allocated ephemeral ports"))
+    parser.add_option("-b", "--backlog", dest="backlog",
+                      default=DEFAULT_BACKLOG, type="int", metavar="BACKLOG",
+                      help=("Length of the backlog queue for the control"
+                            "connection socket"))
+    parser.add_option("--socket-timeout", dest="sock_timeout",
+                      default=DEFAULT_SOCK_TIMEOUT, type="float",
+                      metavar="SOCK_TIMEOUT",
+                      help=("Socket timeout for the server handshake"))
 
     return parser.parse_args(args)
+
+
+def establish_connection(client, addr, ports, opts):
+    # Receive and parse a client request.
+    response = {
+        "source_port": 0,
+        "status": "FAILED",
+    }
+    try:
+        # TODO: support multiple forwardings in the same message?
+        #
+        # Control request, in JSON:
+        #
+        # {
+        #     "source_port":
+        #         <source port or 0 for automatic allocation>,
+        #     "destination_address":
+        #         <destination address of backend server>,
+        #     "destination_port":
+        #         <destination port>
+        #     "password":
+        #         <the password to use to authenticate clients>
+        # }
+        #
+        # The <password> is used for MITM authentication of clients
+        # connecting to <source_port>, who will subsequently be
+        # forwarded to a VNC server listening at
+        # <destination_address>:<destination_port>
+        #
+        # Control reply, in JSON:
+        # {
+        #     "source_port": <the allocated source port>
+        #     "status": <one of "OK" or "FAILED">
+        # }
+        #
+        buf = client.recv(1024)
+        req = json.loads(buf)
+
+        sport_orig = int(req['source_port'])
+        daddr = req['destination_address']
+        dport = int(req['destination_port'])
+        password = req['password']
+    except Exception, e:
+        logger.warn("Malformed request: %s", buf)
+        client.send(json.dumps(response))
+        client.close()
+
+    # Spawn a new Greenlet to service the request.
+    server = None
+    try:
+        # If the client has so indicated, pick an ephemeral source port
+        # randomly, and remove it from the port pool.
+        if sport_orig == 0:
+            while True:
+                try:
+                    sport = random.choice(ports)
+                    ports.remove(sport)
+                    break
+                except ValueError:
+                    logger.debug("Port %d already taken", sport)
+
+            logger.debug("Got port %d from pool, %d remaining",
+                         sport, len(ports))
+            pool = ports
+        else:
+            sport = sport_orig
+            pool = None
+
+        listeners = get_listening_sockets(sport)
+        server = perform_server_handshake(daddr, dport,
+                                          opts.connect_retries,
+                                          opts.retry_wait, opts.sock_timeout)
+
+        VncAuthProxy.spawn(logger, listeners, pool, daddr, dport,
+                           server, password, opts.connect_timeout)
+
+        logger.info("New forwarding: %d (client req'd: %d) -> %s:%d",
+                    sport, sport_orig, daddr, dport)
+        response = {"source_port": sport,
+                    "status": "OK"}
+    except IndexError:
+        logger.error(("FAILED forwarding, out of ports for [req'd by "
+                      "client: %d -> %s:%d]"),
+                     sport_orig, daddr, dport)
+    except Exception, msg:
+        logger.error(msg)
+        logger.error(("FAILED forwarding: %d (client req'd: %d) -> "
+                      "%s:%d"), sport, sport_orig, daddr, dport)
+        if not pool is None:
+            pool.append(sport)
+            logger.debug("Returned port %d to pool, %d remanining",
+                         sport, len(pool))
+        if not server is None:
+            server.close()
+    finally:
+        client.send(json.dumps(response))
+        client.close()
 
 
 def main():
@@ -546,7 +660,7 @@ def main():
 
     os.umask(old_umask)
 
-    ctrl.listen(1)
+    ctrl.listen(opts.backlog)
     logger.info("Initialized, waiting for control connections at %s",
                 opts.ctrl_socket)
 
@@ -566,95 +680,8 @@ def main():
             client, addr = ctrl.accept()
             logger.info("New control connection")
 
-            # Receive and parse a client request.
-            response = {
-                "source_port": 0,
-                "status": "FAILED"
-            }
-            try:
-                # TODO: support multiple forwardings in the same message?
-                #
-                # Control request, in JSON:
-                #
-                # {
-                #     "source_port":
-                #         <source port or 0 for automatic allocation>,
-                #     "destination_address":
-                #         <destination address of backend server>,
-                #     "destination_port":
-                #         <destination port>
-                #     "password":
-                #         <the password to use to authenticate clients>
-                # }
-                #
-                # The <password> is used for MITM authentication of clients
-                # connecting to <source_port>, who will subsequently be
-                # forwarded to a VNC server listening at
-                # <destination_address>:<destination_port>
-                #
-                # Control reply, in JSON:
-                # {
-                #     "source_port": <the allocated source port>
-                #     "status": <one of "OK" or "FAILED">
-                # }
-                #
-                buf = client.recv(1024)
-                req = json.loads(buf)
-
-                sport_orig = int(req['source_port'])
-                daddr = req['destination_address']
-                dport = int(req['destination_port'])
-                password = req['password']
-            except Exception, e:
-                logger.warn("Malformed request: %s", buf)
-                client.send(json.dumps(response))
-                client.close()
-                continue
-
-            # Spawn a new Greenlet to service the request.
-            server = None
-            try:
-                # If the client has so indicated, pick an ephemeral source port
-                # randomly, and remove it from the port pool.
-                if sport_orig == 0:
-                    sport = random.choice(ports)
-                    ports.remove(sport)
-                    logger.debug("Got port %d from pool, %d remaining",
-                                 sport, len(ports))
-                    pool = ports
-                else:
-                    sport = sport_orig
-                    pool = None
-
-                listeners = get_listening_sockets(sport)
-                server = perform_server_handshake(daddr, dport,
-                                                  opts.connect_retries,
-                                                  opts.retry_wait)
-
-                VncAuthProxy.spawn(logger, listeners, pool, daddr, dport,
-                                   server, password, opts.connect_timeout)
-
-                logger.info("New forwarding: %d (client req'd: %d) -> %s:%d",
-                            sport, sport_orig, daddr, dport)
-                response = {"source_port": sport,
-                            "status": "OK"}
-            except IndexError:
-                logger.error(("FAILED forwarding, out of ports for [req'd by "
-                              "client: %d -> %s:%d]"),
-                             sport_orig, daddr, dport)
-            except Exception, msg:
-                logger.error(msg)
-                logger.error(("FAILED forwarding: %d (client req'd: %d) -> "
-                              "%s:%d"), sport, sport_orig, daddr, dport)
-                if not pool is None:
-                    pool.append(sport)
-                    logger.debug("Returned port %d to pool, %d remanining",
-                                 sport, len(pool))
-                if not server is None:
-                    server.close()
-            finally:
-                client.send(json.dumps(response))
-                client.close()
+            gevent.Greenlet.spawn(establish_connection, client, addr,
+                                  ports, opts)
         except Exception, e:
             logger.exception(e)
             continue
