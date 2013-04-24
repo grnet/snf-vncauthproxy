@@ -41,7 +41,7 @@ def parse_arguments(args):
     parser.add_option("--server", dest="server_address",
                       default=DEFAULT_SERVER_ADDRESS,
                       metavar="SERVER",
-                      help=("vncauthproxy server"))
+                      help=("vncauthproxy server address"))
     parser.add_option("--server-port", dest="server_port",
                       default=DEFAULT_SERVER_PORT, type="int",
                       metavar="SERVER_PORT",
@@ -68,8 +68,6 @@ def parse_arguments(args):
     (opts, args) = parser.parse_args(args)
 
     # Mandatory arguments
-    if not opts.server_address:
-        parser.error("The --server argument is mandatory.")
     if not opts.password:
         parser.error("The -P/--password argument is mandatory.")
     if not opts.daddr:

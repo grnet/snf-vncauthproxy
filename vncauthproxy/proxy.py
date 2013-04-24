@@ -20,8 +20,8 @@ vncauthproxy - a VNC authentication proxy
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301, USA.
 
-DEFAULT_BIND_ADDRESS = None
-DEFAULT_LPORT = 24999
+DEFAULT_LISTEN_ADDRESS = None
+DEFAULT_LISTEN_PORT = 24999
 DEFAULT_LOG_FILE = "/var/log/vncauthproxy/vncauthproxy.log"
 DEFAULT_PID_FILE = "/var/run/vncauthproxy/vncauthproxy.pid"
 DEFAULT_CONNECT_TIMEOUT = 30
@@ -454,13 +454,13 @@ def parse_arguments(args):
     from optparse import OptionParser
 
     parser = OptionParser()
-    parser.add_option("--bind", dest="bind_address",
-                      default=DEFAULT_BIND_ADDRESS,
-                      metavar="ADDRESS",
+    parser.add_option("--listen-address", dest="listen_address",
+                      default=DEFAULT_LISTEN_ADDRESS,
+                      metavar="LISTEN_ADDRESS",
                       help=("Address to listen for control connections"))
-    parser.add_option( "--lport", dest="lport",
-                      default=DEFAULT_LPORT,
-                      metavar="LPORT",
+    parser.add_option( "--listen-port", dest="listen_port",
+                      default=DEFAULT_LISTEN_PORT,
+                      metavar="LISTEN_PORT",
                       help=("Port to listen for control connections"))
     parser.add_option("-d", "--debug", action="store_true", dest="debug",
                       help="Enable debugging information")
@@ -653,7 +653,7 @@ def main():
     gevent.reinit()
 
     sockets = []
-    for res in socket.getaddrinfo(opts.bind_address, opts.lport,
+    for res in socket.getaddrinfo(opts.listen_address, opts.listen_port,
                              socket.AF_UNSPEC, socket.SOCK_STREAM, 0,
                              socket.AI_PASSIVE):
         af, socktype, proto, canonname, sa = res
