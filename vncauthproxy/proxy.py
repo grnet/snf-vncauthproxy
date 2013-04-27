@@ -20,21 +20,39 @@ vncauthproxy - a VNC authentication proxy
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301, USA.
 
-DEFAULT_LISTEN_ADDRESS = None
-DEFAULT_LISTEN_PORT = 24999
+# Daemon files
 DEFAULT_LOG_FILE = "/var/log/vncauthproxy/vncauthproxy.log"
 DEFAULT_PID_FILE = "/var/run/vncauthproxy/vncauthproxy.pid"
-DEFAULT_CONNECT_TIMEOUT = 30
+
+# By default, bind / listen for control connections to TCP *:24999
+# (both IPv4 and IPv6)
+DEFAULT_LISTEN_ADDRESS = None
+DEFAULT_LISTEN_PORT = 24999
+
+# Backlog for the control socket
+DEFAULT_BACKLOG = 256
+
+# Timeout for the VNC server connection establishment / RFB handshake
+DEFAULT_SERVER_TIMEOUT = 60.0
+
+# Connect retries and delay between retries for the VNC server socket
 DEFAULT_CONNECT_RETRIES = 3
 DEFAULT_RETRY_WAIT = 0.1
-DEFAULT_BACKLOG = 256
-DEFAULT_SOCK_TIMEOUT = 60.0
+
+# Connect timeout for the listening sockets
+DEFAULT_CONNECT_TIMEOUT = 30
+
+# Port range for the listening sockets
+#
 # We must take care not to fall into the ephemeral port range,
 # this can lead to transient failures to bind a chosen port.
 #
 # By default, Linux uses 32768 to 61000, see:
 # http://www.ncftp.com/ncftpd/doc/misc/ephemeral_ports.html#Linux
 # so 25000-30000 seems to be a sensible default.
+#
+# We also take into account the ports that Ganeti daemons bind to, the port
+# range used by DRBD etc.
 DEFAULT_MIN_PORT = 25000
 DEFAULT_MAX_PORT = 30000
 
@@ -98,44 +116,27 @@ class VncAuthProxy(gevent.Greenlet):
     """
     id = 1
 
-    def __init__(self, logger, listeners, pool, daddr, dport, server, password,
-                 connect_timeout):
+    def __init__(self, logger, client):
         """
         @type logger: logging.Logger
         @param logger: the logger to use
-        @type listeners: list
-        @param listeners: list of listening sockets to use for clients
-        @type pool: list
-        @param pool: if not None, return the client number into this port pool
-        @type daddr: str
-        @param daddr: destination address (IPv4, IPv6 or hostname)
-        @type dport: int
-        @param dport: destination port
-        @type server: socket
-        @param server: VNC server socket
-        @type password: str
-        @param password: password to request from the client
-        @type connect_timeout: int
-        @param connect_timeout: how long to wait for client connections
-                                (seconds)
+        @type client: socket.socket
+        @param listeners: the client control connection socket
 
         """
         gevent.Greenlet.__init__(self)
         self.id = VncAuthProxy.id
         VncAuthProxy.id += 1
         self.log = logger
-        self.listeners = listeners
+        self.client = client
         # A list of worker/forwarder greenlets, one for each direction
         self.workers = []
-        # All listening sockets are assumed to be on the same port
-        self.sport = listeners[0].getsockname()[1]
-        self.pool = pool
-        self.daddr = daddr
-        self.dport = dport
-        self.server = server
-        self.password = password
-        self.client = None
-        self.timeout = connect_timeout
+        self.sport = None
+        self.pool = None
+        self.daddr = None
+        self.dport = None
+        self.server = None
+        self.password = None
 
     def _cleanup(self):
         """Cleanup everything: workers, sockets, ports
@@ -196,6 +197,185 @@ class VncAuthProxy(gevent.Greenlet):
             dest.sendall(d)
         # No need to close the source and dest sockets here.
         # They are owned by and will be closed by the original greenlet.
+
+    def _perform_server_handshake(self):
+        """
+        Initiate a connection with the backend server and perform basic
+        RFB 3.8 handshake with it.
+
+        Return a socket connected to the backend server.
+
+        """
+        server = None
+
+        tries = self.retries
+        while tries:
+            tries -= 1
+
+            # Initiate server connection
+            for res in socket.getaddrinfo(self.addr, self.dport,
+                                          socket.AF_UNSPEC,
+                                          socket.SOCK_STREAM, 0,
+                                          socket.AI_PASSIVE):
+                af, socktype, proto, canonname, sa = res
+                try:
+                    server = socket.socket(af, socktype, proto)
+                except socket.error:
+                    server = None
+                    continue
+
+                # Set socket timeout for the initial handshake
+                server.settimeout(self.server_timeout)
+
+                try:
+                    logger.debug("Connecting to %s:%s", *sa[:2])
+                    server.connect(sa)
+                    logger.debug("Connection to %s:%s successful", *sa[:2])
+                except socket.error:
+                    server.close()
+                    server = None
+                    continue
+
+                # We succesfully connected to the server
+                tries = 0
+                break
+
+            # Wait and retry
+            gevent.sleep(self.retry_wait)
+
+        if server is None:
+            raise Exception("Failed to connect to server")
+
+        version = server.recv(1024)
+        if not rfb.check_version(version):
+            raise Exception("Unsupported RFB version: %s" % version.strip())
+
+        server.send(rfb.RFB_VERSION_3_8 + "\n")
+
+        res = server.recv(1024)
+        types = rfb.parse_auth_request(res)
+        if not types:
+            raise Exception("Error handshaking with the server")
+
+        else:
+            logger.debug("Supported authentication types: %s",
+                         " ".join([str(x) for x in types]))
+
+        if rfb.RFB_AUTHTYPE_NONE not in types:
+            raise Exception("Error, server demands authentication")
+
+        server.send(rfb.to_u8(rfb.RFB_AUTHTYPE_NONE))
+
+        # Check authentication response
+        res = server.recv(4)
+        res = rfb.from_u32(res)
+
+        if res != 0:
+            raise Exception("Authentication error")
+
+        # Reset the timeout for the rest of the session
+        server.settimeout(None)
+
+        self.server = server
+
+    def _establish_connection(self):
+        client = self.client
+        ports = VncAuthProxy.ports
+
+        # Receive and parse a client request.
+        response = {
+            "source_port": 0,
+            "status": "FAILED",
+        }
+        try:
+            # TODO: support multiple forwardings in the same message?
+            #
+            # Control request, in JSON:
+            #
+            # {
+            #     "source_port":
+            #         <source port or 0 for automatic allocation>,
+            #     "destination_address":
+            #         <destination address of backend server>,
+            #     "destination_port":
+            #         <destination port>
+            #     "password":
+            #         <the password to use to authenticate clients>
+            # }
+            #
+            # The <password> is used for MITM authentication of clients
+            # connecting to <source_port>, who will subsequently be
+            # forwarded to a VNC server listening at
+            # <destination_address>:<destination_port>
+            #
+            # Control reply, in JSON:
+            # {
+            #     "source_port": <the allocated source port>
+            #     "status": <one of "OK" or "FAILED">
+            # }
+            #
+            buf = client.recv(1024)
+            req = json.loads(buf)
+
+            sport_orig = int(req['source_port'])
+            daddr = req['destination_address']
+            dport = int(req['destination_port'])
+            password = req['password']
+        except Exception, e:
+            logger.warn("Malformed request: %s", buf)
+            client.send(json.dumps(response))
+            client.close()
+            raise gevent.GreenletExit
+
+        server = None
+        try:
+            # If the client has so indicated, pick an ephemeral source port
+            # randomly, and remove it from the port pool.
+            if sport_orig == 0:
+                while True:
+                    try:
+                        sport = random.choice(ports)
+                        ports.remove(sport)
+                        break
+                    except ValueError:
+                        logger.debug("Port %d already taken", sport)
+
+                logger.debug("Got port %d from pool, %d remaining",
+                             sport, len(ports))
+                pool = ports
+            else:
+                sport = sport_orig
+                pool = None
+
+            self.sport = sport
+            self.pool = pool
+
+            self.listeners = get_listening_sockets(sport)
+            perform_server_handshake()
+
+            logger.info("New forwarding: %d (client req'd: %d) -> %s:%d",
+                        sport, sport_orig, self.daddr, self.dport)
+            response = {"source_port": sport,
+                        "status": "OK"}
+        except IndexError:
+            logger.error(("FAILED forwarding, out of ports for [req'd by "
+                          "client: %d -> %s:%d]"),
+                         sport_orig, self.daddr, self.dport)
+            raise gevent.GreenletExit
+        except Exception, msg:
+            logger.error(msg)
+            logger.error(("FAILED forwarding: %d (client req'd: %d) -> "
+                          "%s:%d"), sport, sport_orig, self.daddr, self.dport)
+            if not pool is None:
+                pool.append(sport)
+                logger.debug("Returned port %d to pool, %d remanining",
+                             sport, len(pool))
+            if not server is None:
+                server.close()
+            raise gevent.GreenletExit
+        finally:
+            client.send(json.dumps(response))
+            client.close()
 
     def _client_handshake(self):
         """
@@ -258,7 +438,7 @@ class VncAuthProxy(gevent.Greenlet):
         # Accept the authentication
         self.client.send(rfb.to_u32(rfb.RFB_AUTH_SUCCESS))
 
-    def _run(self):
+    def _proxy(self):
         try:
             self.info("Waiting for a client to connect at %s",
                       ", ".join(["%s:%d" % s.getsockname()[:2]
@@ -320,6 +500,10 @@ class VncAuthProxy(gevent.Greenlet):
         finally:
             self._cleanup()
 
+    def _run(self):
+        _establish_connection()
+        _proxy()
+
 # Logging support inside VncAuthproxy
 # Wrap all common logging functions in logging-specific methods
 for funcname in ["info", "debug", "warn", "error", "critical",
@@ -338,13 +522,13 @@ def fatal_signal_handler(signame):
     raise SystemExit
 
 
-def get_listening_sockets(sport):
+def get_listening_sockets(sport, saddr=None):
     sockets = []
 
     # Use two sockets, one for IPv4, one for IPv6. IPv4-to-IPv6 mapped
     # addresses do not work reliably everywhere (under linux it may have
     # been disabled in /proc/sys/net/ipv6/bind_ipv6_only).
-    for res in socket.getaddrinfo(None, sport, socket.AF_UNSPEC,
+    for res in socket.getaddrinfo(saddr, sport, socket.AF_UNSPEC,
                                   socket.SOCK_STREAM, 0, socket.AI_PASSIVE):
         af, socktype, proto, canonname, sa = res
         try:
@@ -371,242 +555,81 @@ def get_listening_sockets(sport):
     return sockets
 
 
-def perform_server_handshake(daddr, dport, tries, retry_wait, sock_timeout):
-    """
-    Initiate a connection with the backend server and perform basic
-    RFB 3.8 handshake with it.
-
-    Return a socket connected to the backend server.
-
-    """
-    server = None
-
-    while tries:
-        tries -= 1
-
-        # Initiate server connection
-        for res in socket.getaddrinfo(daddr, dport, socket.AF_UNSPEC,
-                                      socket.SOCK_STREAM, 0,
-                                      socket.AI_PASSIVE):
-            af, socktype, proto, canonname, sa = res
-            try:
-                server = socket.socket(af, socktype, proto)
-            except socket.error:
-                server = None
-                continue
-
-            # Set socket timeout for the initial handshake
-            server.settimeout(sock_timeout)
-
-            try:
-                logger.debug("Connecting to %s:%s", *sa[:2])
-                server.connect(sa)
-                logger.debug("Connection to %s:%s successful", *sa[:2])
-            except socket.error:
-                server.close()
-                server = None
-                continue
-
-            # We succesfully connected to the server
-            tries = 0
-            break
-
-        # Wait and retry
-        gevent.sleep(retry_wait)
-
-    if server is None:
-        raise Exception("Failed to connect to server")
-
-    version = server.recv(1024)
-    if not rfb.check_version(version):
-        raise Exception("Unsupported RFB version: %s" % version.strip())
-
-    server.send(rfb.RFB_VERSION_3_8 + "\n")
-
-    res = server.recv(1024)
-    types = rfb.parse_auth_request(res)
-    if not types:
-        raise Exception("Error handshaking with the server")
-
-    else:
-        logger.debug("Supported authentication types: %s",
-                     " ".join([str(x) for x in types]))
-
-    if rfb.RFB_AUTHTYPE_NONE not in types:
-        raise Exception("Error, server demands authentication")
-
-    server.send(rfb.to_u8(rfb.RFB_AUTHTYPE_NONE))
-
-    # Check authentication response
-    res = server.recv(4)
-    res = rfb.from_u32(res)
-
-    if res != 0:
-        raise Exception("Authentication error")
-
-    # Reset the timeout for the rest of the session
-    server.settimeout(None)
-
-    return server
-
-
 def parse_arguments(args):
     from optparse import OptionParser
 
     parser = OptionParser()
-    parser.add_option("--listen-address", dest="listen_address",
-                      default=DEFAULT_LISTEN_ADDRESS,
-                      metavar="LISTEN_ADDRESS",
-                      help=("Address to listen for control connections"))
-    parser.add_option( "--listen-port", dest="listen_port",
-                      default=DEFAULT_LISTEN_PORT,
-                      metavar="LISTEN_PORT",
-                      help=("Port to listen for control connections"))
     parser.add_option("-d", "--debug", action="store_true", dest="debug",
                       help="Enable debugging information")
-    parser.add_option("-l", "--log", dest="log_file",
+    parser.add_option("--log", dest="log_file",
                       default=DEFAULT_LOG_FILE,
                       metavar="FILE",
-                      help=("Write log to FILE instead of %s" %
+                      help=("Write log to FILE (default: %s)" %
                             DEFAULT_LOG_FILE))
     parser.add_option('--pid-file', dest="pid_file",
                       default=DEFAULT_PID_FILE,
                       metavar='PIDFILE',
                       help=("Save PID to file (default: %s)" %
                             DEFAULT_PID_FILE))
-    parser.add_option("-t", "--connect-timeout", dest="connect_timeout",
-                      default=DEFAULT_CONNECT_TIMEOUT, type="int",
-                      metavar="SECONDS", help=("Wait SECONDS sec for a client "
-                                               "to connect"))
-    parser.add_option("-r", "--connect-retries", dest="connect_retries",
+    parser.add_option("--listen-address", dest="listen_address",
+                      default=DEFAULT_LISTEN_ADDRESS,
+                      metavar="LISTEN_ADDRESS",
+                      help=("Address to listen for control connections"
+                            "(default: *)"))
+    parser.add_option("--listen-port", dest="listen_port",
+                      default=DEFAULT_LISTEN_PORT,
+                      metavar="LISTEN_PORT",
+                      help=("Port to listen for control connections"
+                            "(default: %d)" % DEFAULT_LISTEN_PORT))
+    parser.add_option("-b", "--backlog", dest="backlog",
+                      default=DEFAULT_BACKLOG, type="int", metavar="N",
+                      help=("Size of the backlog for the control connection "
+                          "socket (default: %s)" % DEFAULT_BACKLOG))
+    parser.add_option("--server-timeout", dest="server_timeout",
+                      default=DEFAULT_SERVER_TIMEOUT, type="float",
+                      metavar="N",
+                      help=("Wait for N seconds for the VNC server RFB "
+                            "handshake (default %s)" % DEFAULT_SERVER_TIMEOUT))
+    parser.add_option("--connect-retries", dest="connect_retries",
                       default=DEFAULT_CONNECT_RETRIES, type="int",
-                      metavar="RETRIES",
-                      help="How many times to try to connect to the server")
-    parser.add_option("-w", "--retry-wait", dest="retry_wait",
+                      metavar="N",
+                      help=("Retry N times to connect to the "
+                            "server (default: %d)" %
+                            DEFAULT_CONNECT_RETRIES))
+    parser.add_option("--retry-wait", dest="retry_wait",
                       default=DEFAULT_RETRY_WAIT, type="float",
-                      metavar="SECONDS", help=("Retry connection to server "
-                                               "every SECONDS sec"))
+                      metavar="N",
+                      help=("Wait N seconds before retrying "
+                            "to connect to the server (default: %s)" %
+                            DEFAULT_RETRY_WAIT))
+    parser.add_option("--connect-timeout", dest="connect_timeout",
+                      default=DEFAULT_CONNECT_TIMEOUT, type="int",
+                      metavar="N",
+                      help=("Wait N seconds for a client "
+                            "to connect (default: %d)"
+                            % DEFAULT_CONNECT_TIMEOUT))
     parser.add_option("-p", "--min-port", dest="min_port",
                       default=DEFAULT_MIN_PORT, type="int", metavar="MIN_PORT",
                       help=("The minimum port number to use for automatically-"
-                            "allocated ephemeral ports"))
+                            "allocated ephemeral ports (default: %s)" %
+                            DEFAULT_MIN_PORT))
     parser.add_option("-P", "--max-port", dest="max_port",
                       default=DEFAULT_MAX_PORT, type="int", metavar="MAX_PORT",
                       help=("The maximum port number to use for automatically-"
-                            "allocated ephemeral ports"))
-    parser.add_option("-b", "--backlog", dest="backlog",
-                      default=DEFAULT_BACKLOG, type="int", metavar="BACKLOG",
-                      help=("Length of the backlog queue for the control"
-                            "connection socket"))
-    parser.add_option("--socket-timeout", dest="sock_timeout",
-                      default=DEFAULT_SOCK_TIMEOUT, type="float",
-                      metavar="SOCK_TIMEOUT",
-                      help=("Socket timeout for the server handshake"))
+                            "allocated ephemeral ports (default: %s)" %
+                            DEFAULT_MAX_PORT))
 
-    return parser.parse_args(args)
+    (opts, args) = parser.parse_args(args)
 
-
-def establish_connection(client, addr, ports, opts):
-    # Receive and parse a client request.
-    response = {
-        "source_port": 0,
-        "status": "FAILED",
-    }
-    try:
-        # TODO: support multiple forwardings in the same message?
-        #
-        # Control request, in JSON:
-        #
-        # {
-        #     "source_port":
-        #         <source port or 0 for automatic allocation>,
-        #     "destination_address":
-        #         <destination address of backend server>,
-        #     "destination_port":
-        #         <destination port>
-        #     "password":
-        #         <the password to use to authenticate clients>
-        # }
-        #
-        # The <password> is used for MITM authentication of clients
-        # connecting to <source_port>, who will subsequently be
-        # forwarded to a VNC server listening at
-        # <destination_address>:<destination_port>
-        #
-        # Control reply, in JSON:
-        # {
-        #     "source_port": <the allocated source port>
-        #     "status": <one of "OK" or "FAILED">
-        # }
-        #
-        buf = client.recv(1024)
-        req = json.loads(buf)
-
-        sport_orig = int(req['source_port'])
-        daddr = req['destination_address']
-        dport = int(req['destination_port'])
-        password = req['password']
-    except Exception, e:
-        logger.warn("Malformed request: %s", buf)
-        client.send(json.dumps(response))
-        client.close()
-
-    # Spawn a new Greenlet to service the request.
-    server = None
-    try:
-        # If the client has so indicated, pick an ephemeral source port
-        # randomly, and remove it from the port pool.
-        if sport_orig == 0:
-            while True:
-                try:
-                    sport = random.choice(ports)
-                    ports.remove(sport)
-                    break
-                except ValueError:
-                    logger.debug("Port %d already taken", sport)
-
-            logger.debug("Got port %d from pool, %d remaining",
-                         sport, len(ports))
-            pool = ports
-        else:
-            sport = sport_orig
-            pool = None
-
-        listeners = get_listening_sockets(sport)
-        server = perform_server_handshake(daddr, dport,
-                                          opts.connect_retries,
-                                          opts.retry_wait, opts.sock_timeout)
-
-        VncAuthProxy.spawn(logger, listeners, pool, daddr, dport,
-                           server, password, opts.connect_timeout)
-
-        logger.info("New forwarding: %d (client req'd: %d) -> %s:%d",
-                    sport, sport_orig, daddr, dport)
-        response = {"source_port": sport,
-                    "status": "OK"}
-    except IndexError:
-        logger.error(("FAILED forwarding, out of ports for [req'd by "
-                      "client: %d -> %s:%d]"),
-                     sport_orig, daddr, dport)
-    except Exception, msg:
-        logger.error(msg)
-        logger.error(("FAILED forwarding: %d (client req'd: %d) -> "
-                      "%s:%d"), sport, sport_orig, daddr, dport)
-        if not pool is None:
-            pool.append(sport)
-            logger.debug("Returned port %d to pool, %d remanining",
-                         sport, len(pool))
-        if not server is None:
-            server.close()
-    finally:
-        client.send(json.dumps(response))
-        client.close()
+    if args:
+        parser.print_help()
+        sys.exit(1)
 
 
 def main():
     """Run the daemon from the command line"""
 
-    (opts, args) = parse_arguments(sys.argv[1:])
+    (opts, ) = parse_arguments(sys.argv[1:])
 
     # Create pidfile
     pidf = pidlockfile.TimeoutPIDLockFile(opts.pid_file, 10)
@@ -652,34 +675,7 @@ def main():
     # we *must* reinit gevent
     gevent.reinit()
 
-    sockets = []
-    for res in socket.getaddrinfo(opts.listen_address, opts.listen_port,
-                             socket.AF_UNSPEC, socket.SOCK_STREAM, 0,
-                             socket.AI_PASSIVE):
-        af, socktype, proto, canonname, sa = res
-        try:
-            s = None
-            s = socket.socket(af, socktype, proto)
-            if af == socket.AF_INET6:
-                # Bind v6 only when AF_INET6, otherwise either v4 or v6 bind
-                # will fail.
-                s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-            s.bind(sa)
-            s.listen(opts.backlog)
-            sockets.append(s)
-            logger.info("Control socket listening on %s:%d", *sa[:2])
-        except socket.error, msg:
-            logger.critical("Error binding control socket to %s:%d: %s",
-                         sa[0], sa[1], msg[1])
-            if s:
-                s.close()
-            while sockets:
-                sockets.pop.close()
-
-            sys.exit(1)
-
     # Catch signals to ensure graceful shutdown,
-    # e.g., to make sure the control socket gets unlink()ed.
     #
     # Uses gevent.signal so the handler fires even during
     # gevent.socket.accept()
@@ -689,15 +685,27 @@ def main():
     # Init ephemeral port pool
     ports = range(opts.min_port, opts.max_port + 1)
 
+    # Init VncAuthProxy class attributes
+    VncAuthProxy.server_timeout = opts.server_timeout
+    VncAuthProxy.connect_retries = opts.connect_retries
+    VncAuthProxy.retry_wait = opts.retry_wait
+    VncAuthProxy.connect_timeout = opts.connect_timeout
+
+    try:
+        sockets = get_listening_sockets(opts.listen_address,
+                                        opts.listen_port)
+    except socket.error:
+        logger.critical("Error binding control socket")
+        sys.exit(1)
+
     while True:
         try:
             rlist, _, _ = select(sockets, [], [])
             for ctrl in rlist:
-                client, addr = ctrl.accept()
+                client, _ = ctrl.accept()
                 logger.info("New control connection")
 
-                gevent.Greenlet.spawn(establish_connection, client, addr,
-                                      ports, opts)
+                VncAuthProxy.spawn(logger, client)
         except Exception, e:
             logger.exception(e)
             continue
