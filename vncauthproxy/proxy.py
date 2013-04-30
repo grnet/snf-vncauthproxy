@@ -208,12 +208,12 @@ class VncAuthProxy(gevent.Greenlet):
         """
         server = None
 
-        tries = self.retries
+        tries = VncAuthProxy.connect_retries
         while tries:
             tries -= 1
 
             # Initiate server connection
-            for res in socket.getaddrinfo(self.addr, self.dport,
+            for res in socket.getaddrinfo(self.daddr, self.dport,
                                           socket.AF_UNSPEC,
                                           socket.SOCK_STREAM, 0,
                                           socket.AI_PASSIVE):
@@ -225,12 +225,12 @@ class VncAuthProxy(gevent.Greenlet):
                     continue
 
                 # Set socket timeout for the initial handshake
-                server.settimeout(self.server_timeout)
+                server.settimeout(VncAuthProxy.server_timeout)
 
                 try:
-                    logger.debug("Connecting to %s:%s", *sa[:2])
+                    self.debug("Connecting to %s:%s", *sa[:2])
                     server.connect(sa)
-                    logger.debug("Connection to %s:%s successful", *sa[:2])
+                    self.debug("Connection to %s:%s successful", *sa[:2])
                 except socket.error:
                     server.close()
                     server = None
@@ -241,7 +241,7 @@ class VncAuthProxy(gevent.Greenlet):
                 break
 
             # Wait and retry
-            gevent.sleep(self.retry_wait)
+            gevent.sleep(VncAuthProxy.retry_wait)
 
         if server is None:
             raise Exception("Failed to connect to server")
@@ -258,7 +258,7 @@ class VncAuthProxy(gevent.Greenlet):
             raise Exception("Error handshaking with the server")
 
         else:
-            logger.debug("Supported authentication types: %s",
+            self.debug("Supported authentication types: %s",
                          " ".join([str(x) for x in types]))
 
         if rfb.RFB_AUTHTYPE_NONE not in types:
@@ -318,11 +318,11 @@ class VncAuthProxy(gevent.Greenlet):
             req = json.loads(buf)
 
             sport_orig = int(req['source_port'])
-            daddr = req['destination_address']
-            dport = int(req['destination_port'])
-            password = req['password']
+            self.daddr = req['destination_address']
+            self.dport = int(req['destination_port'])
+            self.password = req['password']
         except Exception, e:
-            logger.warn("Malformed request: %s", buf)
+            self.warn("Malformed request: %s", buf)
             client.send(json.dumps(response))
             client.close()
             raise gevent.GreenletExit
@@ -338,9 +338,9 @@ class VncAuthProxy(gevent.Greenlet):
                         ports.remove(sport)
                         break
                     except ValueError:
-                        logger.debug("Port %d already taken", sport)
+                        self.debug("Port %d already taken", sport)
 
-                logger.debug("Got port %d from pool, %d remaining",
+                self.debug("Got port %d from pool, %d remaining",
                              sport, len(ports))
                 pool = ports
             else:
@@ -350,25 +350,25 @@ class VncAuthProxy(gevent.Greenlet):
             self.sport = sport
             self.pool = pool
 
-            self.listeners = get_listening_sockets(sport)
-            perform_server_handshake()
+            self.listeners = get_listening_sockets(self, sport)
+            self._perform_server_handshake()
 
-            logger.info("New forwarding: %d (client req'd: %d) -> %s:%d",
+            self.info("New forwarding: %d (client req'd: %d) -> %s:%d",
                         sport, sport_orig, self.daddr, self.dport)
             response = {"source_port": sport,
                         "status": "OK"}
         except IndexError:
-            logger.error(("FAILED forwarding, out of ports for [req'd by "
+            self.error(("FAILED forwarding, out of ports for [req'd by "
                           "client: %d -> %s:%d]"),
                          sport_orig, self.daddr, self.dport)
             raise gevent.GreenletExit
         except Exception, msg:
-            logger.error(msg)
-            logger.error(("FAILED forwarding: %d (client req'd: %d) -> "
+            self.error(msg)
+            self.error(("FAILED forwarding: %d (client req'd: %d) -> "
                           "%s:%d"), sport, sport_orig, self.daddr, self.dport)
             if not pool is None:
                 pool.append(sport)
-                logger.debug("Returned port %d to pool, %d remanining",
+                self.debug("Returned port %d to pool, %d remanining",
                              sport, len(pool))
             if not server is None:
                 server.close()
@@ -443,11 +443,11 @@ class VncAuthProxy(gevent.Greenlet):
             self.info("Waiting for a client to connect at %s",
                       ", ".join(["%s:%d" % s.getsockname()[:2]
                                  for s in self.listeners]))
-            rlist, _, _ = select(self.listeners, [], [], timeout=self.timeout)
-
+            rlist, _, _ = select(self.listeners, [], [],
+                          timeout=VncAuthProxy.connect_timeout)
             if not rlist:
                 self.info("Timed out, no connection after %d sec",
-                          self.timeout)
+                          VncAuthProxy.connect_timeout)
                 raise gevent.GreenletExit
 
             for sock in rlist:
@@ -501,8 +501,8 @@ class VncAuthProxy(gevent.Greenlet):
             self._cleanup()
 
     def _run(self):
-        _establish_connection()
-        _proxy()
+        self._establish_connection()
+        self._proxy()
 
 # Logging support inside VncAuthproxy
 # Wrap all common logging functions in logging-specific methods
@@ -522,7 +522,7 @@ def fatal_signal_handler(signame):
     raise SystemExit
 
 
-def get_listening_sockets(sport, saddr=None):
+def get_listening_sockets(logger, sport, saddr=None):
     sockets = []
 
     # Use two sockets, one for IPv4, one for IPv6. IPv4-to-IPv6 mapped
@@ -581,10 +581,6 @@ def parse_arguments(args):
                       metavar="LISTEN_PORT",
                       help=("Port to listen for control connections"
                             "(default: %d)" % DEFAULT_LISTEN_PORT))
-    parser.add_option("-b", "--backlog", dest="backlog",
-                      default=DEFAULT_BACKLOG, type="int", metavar="N",
-                      help=("Size of the backlog for the control connection "
-                          "socket (default: %s)" % DEFAULT_BACKLOG))
     parser.add_option("--server-timeout", dest="server_timeout",
                       default=DEFAULT_SERVER_TIMEOUT, type="float",
                       metavar="N",
@@ -625,11 +621,13 @@ def parse_arguments(args):
         parser.print_help()
         sys.exit(1)
 
+    return opts
+
 
 def main():
     """Run the daemon from the command line"""
 
-    (opts, ) = parse_arguments(sys.argv[1:])
+    opts = parse_arguments(sys.argv[1:])
 
     # Create pidfile
     pidf = pidlockfile.TimeoutPIDLockFile(opts.pid_file, 10)
@@ -690,10 +688,11 @@ def main():
     VncAuthProxy.connect_retries = opts.connect_retries
     VncAuthProxy.retry_wait = opts.retry_wait
     VncAuthProxy.connect_timeout = opts.connect_timeout
+    VncAuthProxy.ports = ports
 
     try:
-        sockets = get_listening_sockets(opts.listen_address,
-                                        opts.listen_port)
+        sockets = get_listening_sockets(logger, opts.listen_port,
+                                        opts.listen_address)
     except socket.error:
         logger.critical("Error binding control socket")
         sys.exit(1)
@@ -714,6 +713,6 @@ def main():
 
     logger.info("Closing control sockets")
     while sockets:
-        sockets.pop.close()
+        sockets.pop().close()
     daemon_context.close()
     sys.exit(0)
