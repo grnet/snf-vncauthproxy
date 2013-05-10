@@ -522,7 +522,7 @@ def fatal_signal_handler(signame):
     raise SystemExit
 
 
-def get_listening_sockets(logger, sport, saddr=None):
+def get_listening_sockets(logger, sport, saddr=None, reuse_addr=False):
     sockets = []
 
     # Use two sockets, one for IPv4, one for IPv6. IPv4-to-IPv6 mapped
@@ -534,10 +534,15 @@ def get_listening_sockets(logger, sport, saddr=None):
         try:
             s = None
             s = socket.socket(af, socktype, proto)
+
             if af == socket.AF_INET6:
                 # Bind v6 only when AF_INET6, otherwise either v4 or v6 bind
                 # will fail.
                 s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+
+            if reuse_addr:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
             s.bind(sa)
             s.listen(1)
             sockets.append(s)
@@ -692,7 +697,7 @@ def main():
 
     try:
         sockets = get_listening_sockets(logger, opts.listen_port,
-                                        opts.listen_address)
+                                        opts.listen_address, reuse_addr=True)
     except socket.error:
         logger.critical("Error binding control socket")
         sys.exit(1)
