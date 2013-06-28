@@ -57,8 +57,11 @@ DEFAULT_MIN_PORT = 25000
 DEFAULT_MAX_PORT = 30000
 
 # SSL certificate / key files
-DEFAULT_CERT_FILE = "/etc/ssl/certs/cert.pem"
-DEFAULT_KEY_FILE = "/etc/ssl/certs/key.pem"
+DEFAULT_CERT_FILE = "/var/lib/vncauthproxy/cert.pem"
+DEFAULT_KEY_FILE = "/var/lib/vncauthproxy/key.pem"
+
+# Auth file
+DEFAULT_AUTH_FILE = "/var/lib/vncauthproxy/users"
 
 import os
 import sys
@@ -68,6 +71,7 @@ import gevent.event
 import daemon
 import random
 import daemon.runner
+import hashlib
 
 import rfb
 
@@ -307,6 +311,10 @@ class VncAuthProxy(gevent.Greenlet):
             #         <destination port>
             #     "password":
             #         <the password to use to authenticate clients>
+            #     "auth_user":
+            #         <user for control connection authentication>,
+            #      "auth_password":
+            #         <password for control connection authentication>,
             # }
             #
             # The <password> is used for MITM authentication of clients
@@ -323,12 +331,33 @@ class VncAuthProxy(gevent.Greenlet):
             buf = client.recv(1024)
             req = json.loads(buf)
 
+            auth_user = req['auth_user']
+            auth_password = req['auth_password']
             sport_orig = int(req['source_port'])
             self.daddr = req['destination_address']
             self.dport = int(req['destination_port'])
             self.password = req['password']
-        except Exception, e:
-            self.warn("Malformed request: %s", buf)
+
+            if auth_user not in VncAuthProxy.authdb:
+                msg = "Authentication failure: user not found"
+                raise Exception(msg)
+
+            (cipher, authdb_password) = VncAuthProxy.authdb[auth_user]
+            if cipher == 'HA1':
+                message = auth_user + ':vncauthproxy:' + auth_password
+                auth_password = hashlib.md5(message).hexdigest()
+
+            if auth_password != authdb_password:
+                msg = "Authentication failure: wrong password"
+                raise Exception(msg)
+        except KeyError:
+            msg = "Malformed request: %s" % buf
+            raise Exception(msg)
+        except Exception as err:
+            logger.exception(err)
+            msg = err.args
+            self.warn(msg)
+            response['reason'] = msg
             client.send(json.dumps(response))
             client.close()
             raise gevent.GreenletExit
@@ -566,6 +595,38 @@ def get_listening_sockets(logger, sport, saddr=None, reuse_addr=False):
     return sockets
 
 
+def parse_auth_file(auth_file):
+    supported_ciphers = ('cleartext', 'HA1')
+
+    with open(auth_file) as f:
+        users = {}
+        lines = [l.strip().split() for l in f.readlines()]
+
+        for line in lines:
+            if not line or line[0][0] == '#':
+                continue
+
+            if len(line) != 2:
+                raise Exception("Invaild user entry in auth file")
+
+            user = line[0]
+            password = line[1]
+
+            split_password = ('cleartext', password)
+            if password[0] == '{':
+                split_password = password[1:].split('}')
+                if len(split_password) != 2 or not split_password[1] \
+                        or split_password[0] not in supported_ciphers:
+                    raise Exception("Invalid password format in auth file")
+
+            if user in users:
+                raise Exception("Duplicate user entry in auth file")
+
+            users[user] = password
+
+    return users
+
+
 def parse_arguments(args):
     from optparse import OptionParser
 
@@ -625,6 +686,10 @@ def parse_arguments(args):
                       help=("The maximum port number to use for automatically-"
                             "allocated ephemeral ports (default: %s)" %
                             DEFAULT_MAX_PORT))
+    parser.add_option('--no-ssl', dest="no_ssl",
+                      default=False, action='store_true',
+                      help=("Disable SSL/TLS for control connections "
+                            "(default: False"))
     parser.add_option('--cert-file', dest="cert_file",
                       default=DEFAULT_CERT_FILE,
                       metavar='CERTFILE',
@@ -635,6 +700,11 @@ def parse_arguments(args):
                       metavar='KEYFILE',
                       help=("SSL key (default: %s)" %
                             DEFAULT_KEY_FILE))
+    parser.add_option('--auth-file', dest="auth_file",
+                      default=DEFAULT_AUTH_FILE,
+                      metavar='AUTHFILE',
+                      help=("Authentication file (default: %s)" %
+                            DEFAULT_AUTH_FILE))
 
     (opts, args) = parser.parse_args(args)
 
@@ -712,24 +782,30 @@ def main():
     VncAuthProxy.ports = ports
 
     try:
+        VncAuthProxy.authdb = parse_auth_file(opts.auth_file)
         sockets = get_listening_sockets(logger, opts.listen_port,
                                         opts.listen_address, reuse_addr=True)
-    except socket.error:
+    except socket.error as err:
+        logger.exception(err)
         logger.critical("Error binding control socket")
+        sys.exit(1)
+    except Exception as err:
+        logger.exception(err)
+        logger.critical("Unexpected error: %s", err.args)
         sys.exit(1)
 
     while True:
         try:
             client = None
-            client_sock = None
             rlist, _, _ = select(sockets, [], [])
             for ctrl in rlist:
-                client_sock, _ = ctrl.accept()
-                client = ssl.wrap_socket(client_sock,
-                                         server_side=True,
-                                         keyfile=opts.key_file,
-                                         certfile=opts.cert_file,
-                                         ssl_version=ssl.PROTOCOL_TLSv1)
+                client, _ = ctrl.accept()
+                if not no_ssl:
+                    client = ssl.wrap_socket(client,
+                                             server_side=True,
+                                             keyfile=opts.key_file,
+                                             certfile=opts.cert_file,
+                                             ssl_version=ssl.PROTOCOL_TLSv1)
                 logger.info("New control connection")
 
                 VncAuthProxy.spawn(logger, client)
@@ -738,8 +814,6 @@ def main():
             logger.exception(e)
             if client:
                 client.close()
-            elif client_sock:
-                client_sock.close()
             continue
         except SystemExit:
             break

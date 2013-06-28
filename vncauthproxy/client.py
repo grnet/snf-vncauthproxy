@@ -65,6 +65,20 @@ def parse_arguments(args):
                       metavar="PASSWORD",
                       help=("Use password PASSWD to authenticate incoming "
                             "VNC connections"))
+    parser.add_option("--auth-user", dest="auth_user",
+                      default=None,
+                      metavar="AUTH_USER",
+                      help=("User to authenticate as, for the control "
+                            "connection"))
+    parser.add_option("--auth-password", dest="auth_password",
+                      default=None,
+                      metavar="AUTH_PASSWORD",
+                      help=("User password for the control connection "
+                            "authentication"))
+    parser.add_option("--no-ssl", dest="no_ssl",
+                      action='store_false', default=False,
+                      help=("Disable SSL/TLS for control connecions "
+                            "(default: %s)" % False))
 
     (opts, args) = parser.parse_args(args)
 
@@ -75,13 +89,18 @@ def parse_arguments(args):
         parser.error("The -d/--dest argument is mandatory.")
     if not opts.dport:
         parser.error("The -p/--dport argument is mandatory.")
+    if not opts.auth_user:
+        parser.error("The --auth-user argument is mandatory.")
+    if not opts.auth_password:
+        parser.error("The --auth-password argument is mandatory.")
 
     return (opts, args)
 
 
 def request_forwarding(sport, daddr, dport, password,
+                       auth_user, auth_password,
                        server_address=DEFAULT_SERVER_ADDRESS,
-                       server_port=DEFAULT_SERVER_PORT, ssl_sock=True):
+                       server_port=DEFAULT_SERVER_PORT, no_ssl=False):
     """Connect to vncauthproxy and request a VNC forwarding."""
     if not password:
         raise ValueError("You must specify a non-empty password")
@@ -91,6 +110,8 @@ def request_forwarding(sport, daddr, dport, password,
         "destination_address": daddr,
         "destination_port": int(dport),
         "password": password,
+        "auth_user": auth_user,
+        "auth_password": auth_password,
     }
 
     retries = 5
@@ -107,7 +128,7 @@ def request_forwarding(sport, daddr, dport, password,
                 server = None
                 continue
 
-            if ssl_sock:
+            if not no_ssl:
                 server = ssl.wrap_socket(
                       server, cert_reqs=ssl.CERT_NONE,
                       ssl_version=ssl.PROTOCOL_TLSv1)
@@ -119,6 +140,7 @@ def request_forwarding(sport, daddr, dport, password,
             except socket.error:
                 server.close()
                 server = None
+                retries -= 1
                 continue
 
             retries = 0
@@ -141,11 +163,17 @@ if __name__ == '__main__':
     (opts, args) = parse_arguments(sys.argv[1:])
 
     res = request_forwarding(sport=opts.sport, daddr=opts.daddr,
-                             dport=opts.dport, password=opts.password)
+                             dport=opts.dport, password=opts.password,
+                             auth_user=opts.auth_user,
+                             auth_password=opts.auth_password,
+                             no_ssl=opts.no_ssl)
 
-    sys.stderr.write("Forwaring %s -> %s:%s: %s\n" % (res['source_port'],
+    reason = None
+    if 'reason' in res:
+        reason = 'Reason: %s\n' % res['reason']
+    sys.stderr.write("Forwaring %s -> %s:%s: %s\n%s" % (res['source_port'],
                                                       opts.daddr, opts.dport,
-                                                      res['status']))
+                                                      res['status'], reason))
 
     if res['status'] == "OK":
         sys.exit(0)
