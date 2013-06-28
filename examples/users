@@ -1,0 +1,3 @@
+user password
+user1 {cleartext}password
+user2 {HA1}md5hash

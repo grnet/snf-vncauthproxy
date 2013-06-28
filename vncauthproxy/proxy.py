@@ -598,8 +598,8 @@ def get_listening_sockets(logger, sport, saddr=None, reuse_addr=False):
 def parse_auth_file(auth_file):
     supported_ciphers = ('cleartext', 'HA1')
 
+    users = {}
     with open(auth_file) as f:
-        users = {}
         lines = [l.strip().split() for l in f.readlines()]
 
         for line in lines:
@@ -623,6 +623,9 @@ def parse_auth_file(auth_file):
                 raise Exception("Duplicate user entry in auth file")
 
             users[user] = password
+
+    if not users:
+        raise "No users defined"
 
     return users
 
