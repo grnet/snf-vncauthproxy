@@ -19,6 +19,7 @@
 
 import sys
 import socket
+import ssl
 
 try:
     import simplejson as json
@@ -80,7 +81,7 @@ def parse_arguments(args):
 
 def request_forwarding(sport, daddr, dport, password,
                        server_address=DEFAULT_SERVER_ADDRESS,
-                       server_port=DEFAULT_SERVER_PORT):
+                       server_port=DEFAULT_SERVER_PORT, ssl_sock=True):
     """Connect to vncauthproxy and request a VNC forwarding."""
     if not password:
         raise ValueError("You must specify a non-empty password")
@@ -105,6 +106,11 @@ def request_forwarding(sport, daddr, dport, password,
             except socket.error:
                 server = None
                 continue
+
+            if ssl_sock:
+                server = ssl.wrap_socket(
+                      server, cert_reqs=ssl.CERT_NONE,
+                      ssl_version=ssl.PROTOCOL_TLSv1)
 
             server.settimeout(60.0)
 

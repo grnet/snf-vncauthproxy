@@ -56,6 +56,10 @@ DEFAULT_CONNECT_TIMEOUT = 30
 DEFAULT_MIN_PORT = 25000
 DEFAULT_MAX_PORT = 30000
 
+# SSL certificate / key files
+DEFAULT_CERT_FILE = "/etc/ssl/certs/cert.pem"
+DEFAULT_KEY_FILE = "/etc/ssl/certs/key.pem"
+
 import os
 import sys
 import logging
@@ -72,7 +76,7 @@ try:
 except ImportError:
     import json
 
-from gevent import socket
+from gevent import socket, ssl
 from signal import SIGINT, SIGTERM
 from gevent.select import select
 
@@ -155,9 +159,11 @@ class VncAuthProxy(gevent.Greenlet):
 
         self.debug("Cleaning up sockets")
         while self.listeners:
-            self.listeners.pop().close()
+            sock = self.listeners.pop().close()
+
         if self.server:
             self.server.close()
+
         if self.client:
             self.client.close()
 
@@ -457,7 +463,7 @@ class VncAuthProxy(gevent.Greenlet):
                 # Close all listening sockets, we only want a one-shot
                 # connection from a single client.
                 while self.listeners:
-                    self.listeners.pop().close()
+                    sock = self.listeners.pop().close()
                 break
 
             # Perform RFB handshake with the client.
@@ -552,7 +558,7 @@ def get_listening_sockets(logger, sport, saddr=None, reuse_addr=False):
             if s:
                 s.close()
             while sockets:
-                sockets.pop().close()
+                sock = sockets.pop().close()
 
             # Make sure we fail immediately if we cannot get a socket
             raise msg
@@ -619,6 +625,16 @@ def parse_arguments(args):
                       help=("The maximum port number to use for automatically-"
                             "allocated ephemeral ports (default: %s)" %
                             DEFAULT_MAX_PORT))
+    parser.add_option('--cert-file', dest="cert_file",
+                      default=DEFAULT_CERT_FILE,
+                      metavar='CERTFILE',
+                      help=("SSL certificate (default: %s)" %
+                            DEFAULT_CERT_FILE))
+    parser.add_option('--key-file', dest="key_file",
+                      default=DEFAULT_KEY_FILE,
+                      metavar='KEYFILE',
+                      help=("SSL key (default: %s)" %
+                            DEFAULT_KEY_FILE))
 
     (opts, args) = parser.parse_args(args)
 
@@ -704,20 +720,34 @@ def main():
 
     while True:
         try:
+            client = None
+            client_sock = None
             rlist, _, _ = select(sockets, [], [])
             for ctrl in rlist:
-                client, _ = ctrl.accept()
+                client_sock, _ = ctrl.accept()
+                client = ssl.wrap_socket(client_sock,
+                                         server_side=True,
+                                         keyfile=opts.key_file,
+                                         certfile=opts.cert_file,
+                                         ssl_version=ssl.PROTOCOL_TLSv1)
                 logger.info("New control connection")
 
                 VncAuthProxy.spawn(logger, client)
+            continue
         except Exception, e:
             logger.exception(e)
+            if client:
+                client.close()
+            elif client_sock:
+                client_sock.close()
             continue
         except SystemExit:
             break
 
     logger.info("Closing control sockets")
     while sockets:
-        sockets.pop().close()
+        sock = sockets.pop()
+        sock.close()
+
     daemon_context.close()
     sys.exit(0)
