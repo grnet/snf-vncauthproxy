@@ -625,7 +625,7 @@ def parse_auth_file(auth_file):
             users[user] = password
 
     if not users:
-        raise "No users defined"
+        logger.warn("No users specified.")
 
     return users
 
@@ -803,7 +803,7 @@ def main():
             rlist, _, _ = select(sockets, [], [])
             for ctrl in rlist:
                 client, _ = ctrl.accept()
-                if not no_ssl:
+                if not opts.no_ssl:
                     client = ssl.wrap_socket(client,
                                              server_side=True,
                                              keyfile=opts.key_file,
