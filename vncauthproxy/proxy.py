@@ -612,7 +612,7 @@ def parse_auth_file(auth_file):
             user = line[0]
             password = line[1]
 
-            split_password = ('cleartext', password)
+            split_password = ('{cleartext}', password)
             if password[0] == '{':
                 split_password = password[1:].split('}')
                 if len(split_password) != 2 or not split_password[1] \
@@ -622,7 +622,7 @@ def parse_auth_file(auth_file):
             if user in users:
                 raise Exception("Duplicate user entry in auth file")
 
-            users[user] = password
+            users[user] = split_password
 
     if not users:
         logger.warn("No users specified.")
