@@ -1,0 +1,18 @@
+#!/bin/sh -e
+
+case $1 in
+	purge)
+        echo "Removing rc.d links..."
+        update-rc.d vncauthproxy remove
+
+		if which deluser >/dev/null 2>&1; then
+			deluser --quiet vncauthproxy > /dev/null || true
+		fi
+
+		if which delgroup; then
+			delgroup --quiet vncauthproxy > /dev/null || true
+		fi
+		;;
+esac
+
+exit 0

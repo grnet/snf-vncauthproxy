@@ -1,0 +1,39 @@
+#!/bin/sh -e
+
+setup_vncauthproxy_user() {
+	if ! getent passwd vncauthproxy >/dev/null; then
+		adduser --quiet --system --no-create-home --home /var/run/vncauthproxy --shell /usr/sbin/nologin vncauthproxy
+	fi
+
+	if ! getent group vncauthproxy >/dev/null; then
+		addgroup --system --quiet vncauthproxy
+	fi
+}
+
+setup_vncauthproxy_user
+
+case "$1" in
+    configure)
+        chown vncauthproxy:vncauthproxy /var/log/vncauthproxy
+        chown vncauthproxy:vncauthproxy /var/lib/vncauthproxy
+
+        echo "Updating rc.d links... "
+        update-rc.d vncauthproxy defaults
+        echo "Starting snf-vncauthproxy...\n"
+        if [ -x "/usr/sbin/invoke-rc.d" ]; then
+            invoke-rc.d vncauthproxy start
+        else
+            /etc/init.d/vncauthproxy start
+        fi
+    ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+exit 0

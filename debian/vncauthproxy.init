@@ -19,7 +19,7 @@ DESC="VNC authentication proxy"
 RUNDIR=/var/run/$NAME
 LOGDIR=/var/log/$NAME
 PIDFILE=$RUNDIR/$NAME.pid
-CHUID="nobody:nogroup"
+CHUID="vncauthproxy:vncauthproxy"
 
 . /lib/lsb/init-functions
 
