@@ -131,6 +131,7 @@ def request_forwarding(sport, daddr, dport, password,
         "auth_password": auth_password,
     }
 
+    last_error = None
     retries = 5
     while retries:
         # Initiate server connection
@@ -160,10 +161,11 @@ def request_forwarding(sport, daddr, dport, password,
 
             try:
                 server.connect(sa)
-            except socket.error:
+            except socket.error as err:
                 server.close()
                 server = None
                 retries -= 1
+                last_error = err
                 continue
 
             retries = 0
@@ -172,7 +174,7 @@ def request_forwarding(sport, daddr, dport, password,
         sleep(0.2)
 
     if server is None:
-        raise Exception("Failed to connect to server")
+        raise Exception("Failed to connect to server: %s" % last_error)
 
     server.send(json.dumps(req))
 
