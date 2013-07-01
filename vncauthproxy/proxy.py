@@ -88,11 +88,16 @@ from lockfile import LockTimeout, AlreadyLocked
 # Take care of differences between python-daemon versions.
 try:
     from daemon import pidfile as pidlockfile
-except:
+except ImportError:
     from daemon import pidlockfile
 
 
 logger = None
+
+
+class InternalError(Exception):
+    """Exception for internal vncauthproxy errors"""
+    pass
 
 
 # Currently, gevent uses libevent-dns for asynchronous DNS resolution,
@@ -241,7 +246,8 @@ class VncAuthProxy(gevent.Greenlet):
                     self.debug("Connecting to %s:%s", *sa[:2])
                     server.connect(sa)
                     self.debug("Connection to %s:%s successful", *sa[:2])
-                except socket.error:
+                except socket.error as err:
+                    self.debug("Failed to perform sever hanshake, retrying...")
                     server.close()
                     server = None
                     continue
@@ -254,25 +260,26 @@ class VncAuthProxy(gevent.Greenlet):
             gevent.sleep(VncAuthProxy.retry_wait)
 
         if server is None:
-            raise Exception("Failed to connect to server")
+            raise InternalError("Failed to connect to server")
 
         version = server.recv(1024)
         if not rfb.check_version(version):
-            raise Exception("Unsupported RFB version: %s" % version.strip())
+            raise InternalError("Unsupported RFB version: %s"
+                                % version.strip())
 
         server.send(rfb.RFB_VERSION_3_8 + "\n")
 
         res = server.recv(1024)
         types = rfb.parse_auth_request(res)
         if not types:
-            raise Exception("Error handshaking with the server")
+            raise InternalError("Error handshaking with the server")
 
         else:
             self.debug("Supported authentication types: %s",
                          " ".join([str(x) for x in types]))
 
         if rfb.RFB_AUTHTYPE_NONE not in types:
-            raise Exception("Error, server demands authentication")
+            raise InternalError("Error, server demands authentication")
 
         server.send(rfb.to_u8(rfb.RFB_AUTHTYPE_NONE))
 
@@ -281,7 +288,7 @@ class VncAuthProxy(gevent.Greenlet):
         res = rfb.from_u32(res)
 
         if res != 0:
-            raise Exception("Authentication error")
+            raise InternalError("Authentication error")
 
         # Reset the timeout for the rest of the session
         server.settimeout(None)
@@ -298,8 +305,6 @@ class VncAuthProxy(gevent.Greenlet):
             "status": "FAILED",
         }
         try:
-            # TODO: support multiple forwardings in the same message?
-            #
             # Control request, in JSON:
             #
             # {
@@ -340,7 +345,7 @@ class VncAuthProxy(gevent.Greenlet):
 
             if auth_user not in VncAuthProxy.authdb:
                 msg = "Authentication failure: user not found"
-                raise Exception(msg)
+                raise InternalError(msg)
 
             (cipher, authdb_password) = VncAuthProxy.authdb[auth_user]
             if cipher == 'HA1':
@@ -349,20 +354,26 @@ class VncAuthProxy(gevent.Greenlet):
 
             if auth_password != authdb_password:
                 msg = "Authentication failure: wrong password"
-                raise Exception(msg)
+                raise InternalError(msg)
         except KeyError:
             msg = "Malformed request: %s" % buf
-            raise Exception(msg)
+            raise InternalError(msg)
+        except InternalError as err:
+            self.warn(err)
+            response['reason'] = str(err)
+            client.send(json.dumps(response))
+            client.close()
+            raise gevent.GreenletExit
         except Exception as err:
-            logger.exception(err)
-            msg = err.args
-            self.warn(msg)
-            response['reason'] = msg
+            self.exception(err)
+            self.error("Unexpected error")
             client.send(json.dumps(response))
             client.close()
             raise gevent.GreenletExit
 
         server = None
+        pool = None
+        sport = sport_orig
         try:
             # If the client has so indicated, pick an ephemeral source port
             # randomly, and remove it from the port pool.
@@ -376,16 +387,13 @@ class VncAuthProxy(gevent.Greenlet):
                         self.debug("Port %d already taken", sport)
 
                 self.debug("Got port %d from pool, %d remaining",
-                             sport, len(ports))
+                           sport, len(ports))
                 pool = ports
-            else:
-                sport = sport_orig
-                pool = None
 
             self.sport = sport
             self.pool = pool
 
-            self.listeners = get_listening_sockets(self, sport)
+            self.listeners = get_listening_sockets(sport)
             self._perform_server_handshake()
 
             self.info("New forwarding: %d (client req'd: %d) -> %s:%d",
@@ -397,15 +405,27 @@ class VncAuthProxy(gevent.Greenlet):
                           "client: %d -> %s:%d]"),
                          sport_orig, self.daddr, self.dport)
             raise gevent.GreenletExit
-        except Exception, msg:
-            self.error(msg)
+        except InternalError as err:
+            self.error(err)
             self.error(("FAILED forwarding: %d (client req'd: %d) -> "
                           "%s:%d"), sport, sport_orig, self.daddr, self.dport)
-            if not pool is None:
+            if pool:
                 pool.append(sport)
                 self.debug("Returned port %d to pool, %d remanining",
                              sport, len(pool))
-            if not server is None:
+            if server:
+                server.close()
+            raise gevent.GreenletExit
+        except Exception as err:
+            self.exception(err)
+            self.error("Unexpected error")
+            self.error(("FAILED forwarding: %d (client req'd: %d) -> "
+                          "%s:%d"), sport, sport_orig, self.daddr, self.dport)
+            if pool:
+                pool.append(sport)
+                self.debug("Returned port %d to pool, %d remanining",
+                             sport, len(pool))
+            if server:
                 server.close()
             raise gevent.GreenletExit
         finally:
@@ -526,12 +546,13 @@ class VncAuthProxy(gevent.Greenlet):
             # all worker, socket and port cleanup
             self.debug("A forwarder died, our work here is done")
             raise gevent.GreenletExit
-        except Exception, e:
+        except Exception as err:
             # Any unhandled exception in the previous block
             # is an error and must be logged accordingly
             if not isinstance(e, gevent.GreenletExit):
-                self.exception(e)
-            raise e
+                self.exception(err)
+                self.error("Unexpected error")
+            raise err
         finally:
             self._cleanup()
 
@@ -557,7 +578,7 @@ def fatal_signal_handler(signame):
     raise SystemExit
 
 
-def get_listening_sockets(logger, sport, saddr=None, reuse_addr=False):
+def get_listening_sockets(sport, saddr=None, reuse_addr=False):
     sockets = []
 
     # Use two sockets, one for IPv4, one for IPv6. IPv4-to-IPv6 mapped
@@ -582,15 +603,15 @@ def get_listening_sockets(logger, sport, saddr=None, reuse_addr=False):
             s.listen(1)
             sockets.append(s)
             logger.debug("Listening on %s:%d", *sa[:2])
-        except socket.error, msg:
-            logger.error("Error binding to %s:%d: %s", sa[0], sa[1], msg[1])
+        except socket.error as err:
+            logger.error("Error binding to %s:%d: %s", sa[0], sa[1], err[1])
             if s:
                 s.close()
             while sockets:
                 sock = sockets.pop().close()
 
             # Make sure we fail immediately if we cannot get a socket
-            raise msg
+            raise InernalError(err)
 
     return sockets
 
@@ -599,30 +620,35 @@ def parse_auth_file(auth_file):
     supported_ciphers = ('cleartext', 'HA1')
 
     users = {}
-    with open(auth_file) as f:
-        lines = [l.strip().split() for l in f.readlines()]
+    try:
+        with open(auth_file) as f:
+            lines = [l.strip().split() for l in f.readlines()]
 
-        for line in lines:
-            if not line or line[0][0] == '#':
-                continue
+            for line in lines:
+                if not line or line[0][0] == '#':
+                    continue
 
-            if len(line) != 2:
-                raise Exception("Invaild user entry in auth file")
+                if len(line) != 2:
+                    raise InternalError("Invaild user entry in auth file")
 
-            user = line[0]
-            password = line[1]
+                user = line[0]
+                password = line[1]
 
-            split_password = ('{cleartext}', password)
-            if password[0] == '{':
-                split_password = password[1:].split('}')
-                if len(split_password) != 2 or not split_password[1] \
-                        or split_password[0] not in supported_ciphers:
-                    raise Exception("Invalid password format in auth file")
+                split_password = ('{cleartext}', password)
+                if password[0] == '{':
+                    split_password = password[1:].split('}')
+                    if len(split_password) != 2 or not split_password[1] \
+                            or split_password[0] not in supported_ciphers:
+                        raise InternalError("Invalid password format "
+                                            "in auth file")
 
-            if user in users:
-                raise Exception("Duplicate user entry in auth file")
+                if user in users:
+                    raise InternalError("Duplicate user entry in auth file")
 
-            users[user] = split_password
+                users[user] = split_password
+    except IOError as err:
+        logger.error("Couldn't read auth file")
+        raise InternalError(err)
 
     if not users:
         logger.warn("No users specified.")
@@ -786,15 +812,23 @@ def main():
 
     try:
         VncAuthProxy.authdb = parse_auth_file(opts.auth_file)
-        sockets = get_listening_sockets(logger, opts.listen_port,
-                                        opts.listen_address, reuse_addr=True)
-    except socket.error as err:
+    except InternalError as err:
+        logger.critical(err)
+        sys.exit(1)
+    except Exception as err:
         logger.exception(err)
+        logger.error("Unexpected error")
+        sys.exit(1)
+
+    try:
+        sockets = get_listening_sockets(opts.listen_port, opts.listen_address,
+                                        reuse_addr=True)
+    except InternalError as err:
         logger.critical("Error binding control socket")
         sys.exit(1)
     except Exception as err:
         logger.exception(err)
-        logger.critical("Unexpected error: %s", err.args)
+        logger.error("Unexpected error")
         sys.exit(1)
 
     while True:
@@ -815,6 +849,7 @@ def main():
             continue
         except Exception, e:
             logger.exception(e)
+            logger.error("Unexpected error")
             if client:
                 client.close()
             continue
