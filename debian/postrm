@@ -9,7 +9,7 @@ case $1 in
 			deluser --quiet vncauthproxy > /dev/null || true
 		fi
 
-		if which delgroup; then
+		if which delgroup >/dev/null 2>&1; then
 			delgroup --quiet vncauthproxy > /dev/null || true
 		fi
 		;;
