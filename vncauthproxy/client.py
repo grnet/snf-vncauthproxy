@@ -76,9 +76,18 @@ def parse_arguments(args):
                       help=("User password for the control connection "
                             "authentication"))
     parser.add_option("--no-ssl", dest="no_ssl",
-                      action='store_false', default=False,
+                      action='store_true', default=False,
                       help=("Disable SSL/TLS for control connecions "
                             "(default: %s)" % False))
+    parser.add_option("--ca-cert", dest="ca_cert",
+                      default=None,
+                      metavar="CACERT",
+                      help=("CA certificate file to use for server auth"))
+    parser.add_option("--strict", dest="strict",
+                      default=False, action='store_true',
+                      metavar="STRICT",
+                      help=("Perform strict authentication on the server "
+                            "SSL cert"))
 
     (opts, args) = parser.parse_args(args)
 
@@ -94,13 +103,21 @@ def parse_arguments(args):
     if not opts.auth_password:
         parser.error("The --auth-password argument is mandatory.")
 
+    # Sanity check
+    if opts.strict and not opts.ca_cert:
+        parser.error("--strict requires --ca-cert to be set")
+    if opts.no_ssl and opts.ca_cert:
+        parser.error("--no-ssl and --ca-cert / --strict options "
+                     "are mutually exclusive")
+
     return (opts, args)
 
 
 def request_forwarding(sport, daddr, dport, password,
                        auth_user, auth_password,
                        server_address=DEFAULT_SERVER_ADDRESS,
-                       server_port=DEFAULT_SERVER_PORT, no_ssl=False):
+                       server_port=DEFAULT_SERVER_PORT, no_ssl=False,
+                       ca_cert=None, strict=False):
     """Connect to vncauthproxy and request a VNC forwarding."""
     if not password:
         raise ValueError("You must specify a non-empty password")
@@ -129,8 +146,14 @@ def request_forwarding(sport, daddr, dport, password,
                 continue
 
             if not no_ssl:
+                reqs = ssl.CERT_NONE
+                if strict:
+                    reqs = ssl.CERT_REQUIRED
+                elif ca_cert:
+                    reqs = ssl.CERT_OPTIONAL
+
                 server = ssl.wrap_socket(
-                      server, cert_reqs=ssl.CERT_NONE,
+                      server, cert_reqs=reqs, ca_certs=ca_cert,
                       ssl_version=ssl.PROTOCOL_TLSv1)
 
             server.settimeout(60.0)
@@ -166,7 +189,8 @@ if __name__ == '__main__':
                              dport=opts.dport, password=opts.password,
                              auth_user=opts.auth_user,
                              auth_password=opts.auth_password,
-                             no_ssl=opts.no_ssl)
+                             no_ssl=opts.no_ssl, ca_cert=opts.ca_cert,
+                             strict=opts.strict)
 
     reason = None
     if 'reason' in res:
