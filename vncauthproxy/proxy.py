@@ -72,6 +72,7 @@ import daemon
 import random
 import daemon.runner
 import hashlib
+import re
 
 import rfb
 
@@ -617,35 +618,36 @@ def get_listening_sockets(sport, saddr=None, reuse_addr=False):
 
 
 def parse_auth_file(auth_file):
-    supported_ciphers = ('cleartext', 'HA1')
+    supported_ciphers = ('cleartext', 'HA1', None)
+    regexp = re.compile(r'^\s*(?P<user>\S+)\s+({(?P<cipher>\S+)})?'
+                         '(?P<pass>\S+)\s*$')
 
     users = {}
     try:
         with open(auth_file) as f:
-            lines = [l.strip().split() for l in f.readlines()]
+            lines = [l.strip() for l in f.readlines()]
 
             for line in lines:
-                if not line or line[0][0] == '#':
+                if not line or line.startswith('#'):
                     continue
 
-                if len(line) != 2:
-                    raise InternalError("Invaild user entry in auth file")
+                m = regexp.match(line)
+                if not m:
+                    raise InternalError("Invaild entry in auth file: %s"
+                                        % line)
 
-                user = line[0]
-                password = line[1]
+                user = m.group('user')
+                cipher = m.group('cipher')
+                if cipher not in supported_ciphers:
+                    raise InternalError("Unsupported cipher in auth file: "
+                                        "%s" % line)
 
-                split_password = ('{cleartext}', password)
-                if password[0] == '{':
-                    split_password = password[1:].split('}', 2)
-                    if len(split_password) != 2 or not split_password[1] \
-                            or split_password[0] not in supported_ciphers:
-                        raise InternalError("Invalid password format "
-                                            "in auth file")
+                password = (cipher, m.group('pass'))
 
                 if user in users:
                     raise InternalError("Duplicate user entry in auth file")
 
-                users[user] = split_password
+                users[user] = password
     except IOError as err:
         logger.error("Couldn't read auth file")
         raise InternalError(err)
