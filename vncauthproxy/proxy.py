@@ -636,7 +636,7 @@ def parse_auth_file(auth_file):
 
                 split_password = ('{cleartext}', password)
                 if password[0] == '{':
-                    split_password = password[1:].split('}')
+                    split_password = password[1:].split('}', 2)
                     if len(split_password) != 2 or not split_password[1] \
                             or split_password[0] not in supported_ciphers:
                         raise InternalError("Invalid password format "
