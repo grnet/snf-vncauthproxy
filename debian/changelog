@@ -1,3 +1,9 @@
+snf-vncauthproxy (1.4-1~wheezy) wheezy; urgency=low
+
+  * 1.4rc2-1 released as 1.4-1~wheezy
+
+ -- Christos Stavrakakis <cstavr@grnet.gr>  Wed, 25 Sep 2013 00:13:07 +0300
+
 snf-vncauthproxy (1.4~rc2-1) stable; urgency=low
 
   * Fix race in socket pooling
@@ -23,3 +29,4 @@ snf-vncauthproxy (1.1-1) stable; urgency=low
   * Initial release. Official vncauthproxy + patches
 
  -- Vangelis Koukis <vkoukis@grnet.gr>  Thu, 2 Nov 2011 18:11:37 +0200
+
