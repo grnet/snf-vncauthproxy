@@ -72,6 +72,7 @@ import daemon
 import random
 import daemon.runner
 import hashlib
+import re
 
 import rfb
 
@@ -168,7 +169,7 @@ class VncAuthProxy(gevent.Greenlet):
 
         self.debug("Cleaning up sockets")
         while self.listeners:
-            sock = self.listeners.pop().close()
+            self.listeners.pop().close()
 
         if self.server:
             self.server.close()
@@ -246,7 +247,7 @@ class VncAuthProxy(gevent.Greenlet):
                     self.debug("Connecting to %s:%s", *sa[:2])
                     server.connect(sa)
                     self.debug("Connection to %s:%s successful", *sa[:2])
-                except socket.error as err:
+                except socket.error:
                     self.debug("Failed to perform sever hanshake, retrying...")
                     server.close()
                     server = None
@@ -276,7 +277,7 @@ class VncAuthProxy(gevent.Greenlet):
 
         else:
             self.debug("Supported authentication types: %s",
-                         " ".join([str(x) for x in types]))
+                       " ".join([str(x) for x in types]))
 
         if rfb.RFB_AUTHTYPE_NONE not in types:
             raise InternalError("Error, server demands authentication")
@@ -397,22 +398,22 @@ class VncAuthProxy(gevent.Greenlet):
             self._perform_server_handshake()
 
             self.info("New forwarding: %d (client req'd: %d) -> %s:%d",
-                        sport, sport_orig, self.daddr, self.dport)
+                      sport, sport_orig, self.daddr, self.dport)
             response = {"source_port": sport,
                         "status": "OK"}
         except IndexError:
-            self.error(("FAILED forwarding, out of ports for [req'd by "
-                          "client: %d -> %s:%d]"),
-                         sport_orig, self.daddr, self.dport)
+            self.error("FAILED forwarding, out of ports for [req'd by "
+                       "client: %d -> %s:%d]",
+                       sport_orig, self.daddr, self.dport)
             raise gevent.GreenletExit
         except InternalError as err:
             self.error(err)
             self.error(("FAILED forwarding: %d (client req'd: %d) -> "
-                          "%s:%d"), sport, sport_orig, self.daddr, self.dport)
+                        "%s:%d"), sport, sport_orig, self.daddr, self.dport)
             if pool:
                 pool.append(sport)
                 self.debug("Returned port %d to pool, %d remanining",
-                             sport, len(pool))
+                           sport, len(pool))
             if server:
                 server.close()
             raise gevent.GreenletExit
@@ -420,11 +421,11 @@ class VncAuthProxy(gevent.Greenlet):
             self.exception(err)
             self.error("Unexpected error")
             self.error(("FAILED forwarding: %d (client req'd: %d) -> "
-                          "%s:%d"), sport, sport_orig, self.daddr, self.dport)
+                        "%s:%d"), sport, sport_orig, self.daddr, self.dport)
             if pool:
                 pool.append(sport)
                 self.debug("Returned port %d to pool, %d remanining",
-                             sport, len(pool))
+                           sport, len(pool))
             if server:
                 server.close()
             raise gevent.GreenletExit
@@ -499,7 +500,7 @@ class VncAuthProxy(gevent.Greenlet):
                       ", ".join(["%s:%d" % s.getsockname()[:2]
                                  for s in self.listeners]))
             rlist, _, _ = select(self.listeners, [], [],
-                          timeout=VncAuthProxy.connect_timeout)
+                                 timeout=VncAuthProxy.connect_timeout)
             if not rlist:
                 self.info("Timed out, no connection after %d sec",
                           VncAuthProxy.connect_timeout)
@@ -549,7 +550,7 @@ class VncAuthProxy(gevent.Greenlet):
         except Exception as err:
             # Any unhandled exception in the previous block
             # is an error and must be logged accordingly
-            if not isinstance(e, gevent.GreenletExit):
+            if not isinstance(err, gevent.GreenletExit):
                 self.exception(err)
                 self.error("Unexpected error")
             raise err
@@ -608,44 +609,45 @@ def get_listening_sockets(sport, saddr=None, reuse_addr=False):
             if s:
                 s.close()
             while sockets:
-                sock = sockets.pop().close()
+                sockets.pop().close()
 
             # Make sure we fail immediately if we cannot get a socket
-            raise InernalError(err)
+            raise InternalError(err)
 
     return sockets
 
 
 def parse_auth_file(auth_file):
-    supported_ciphers = ('cleartext', 'HA1')
+    supported_ciphers = ('cleartext', 'HA1', None)
+    regexp = re.compile(r'^\s*(?P<user>\S+)\s+({(?P<cipher>\S+)})?'
+                        '(?P<pass>\S+)\s*$')
 
     users = {}
     try:
         with open(auth_file) as f:
-            lines = [l.strip().split() for l in f.readlines()]
+            lines = [l.strip() for l in f.readlines()]
 
             for line in lines:
-                if not line or line[0][0] == '#':
+                if not line or line.startswith('#'):
                     continue
 
-                if len(line) != 2:
-                    raise InternalError("Invaild user entry in auth file")
+                m = regexp.match(line)
+                if not m:
+                    raise InternalError("Invaild entry in auth file: %s"
+                                        % line)
 
-                user = line[0]
-                password = line[1]
+                user = m.group('user')
+                cipher = m.group('cipher')
+                if cipher not in supported_ciphers:
+                    raise InternalError("Unsupported cipher in auth file: "
+                                        "%s" % line)
 
-                split_password = ('{cleartext}', password)
-                if password[0] == '{':
-                    split_password = password[1:].split('}')
-                    if len(split_password) != 2 or not split_password[1] \
-                            or split_password[0] not in supported_ciphers:
-                        raise InternalError("Invalid password format "
-                                            "in auth file")
+                password = (cipher, m.group('pass'))
 
                 if user in users:
                     raise InternalError("Duplicate user entry in auth file")
 
-                users[user] = split_password
+                users[user] = password
     except IOError as err:
         logger.error("Couldn't read auth file")
         raise InternalError(err)
@@ -828,7 +830,7 @@ def main():
         sys.exit(1)
     except Exception as err:
         logger.exception(err)
-        logger.error("Unexpected error")
+        logger.critical("Unexpected error")
         sys.exit(1)
 
     while True:
@@ -847,8 +849,8 @@ def main():
 
                 VncAuthProxy.spawn(logger, client)
             continue
-        except Exception, e:
-            logger.exception(e)
+        except Exception as err:
+            logger.exception(err)
             logger.error("Unexpected error")
             if client:
                 client.close()
