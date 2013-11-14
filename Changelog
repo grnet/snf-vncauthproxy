@@ -1,0 +1,15 @@
+.. _Changelog:
+
+Changelog for snf-vncauthproxy
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. _Changelog-1.4next:
+
+v1.4next
+========
+
+Released: UNRELEASED
+
+	* Add Changelog, README and docs
+	* Replace Unix domain control sockets with TCP control sockets, with
+	  basic authentication and SSL support.
