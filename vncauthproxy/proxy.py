@@ -24,9 +24,8 @@ vncauthproxy - a VNC authentication proxy
 DEFAULT_LOG_FILE = "/var/log/vncauthproxy/vncauthproxy.log"
 DEFAULT_PID_FILE = "/var/run/vncauthproxy/vncauthproxy.pid"
 
-# By default, bind / listen for control connections to TCP *:24999
-# (both IPv4 and IPv6)
-DEFAULT_LISTEN_ADDRESS = None
+# By default, bind / listen for control connections to TCP(v4) 127.0.0.1:24999
+DEFAULT_LISTEN_ADDRESS = "127.0.0.1"
 DEFAULT_LISTEN_PORT = 24999
 
 # Backlog for the control socket
@@ -649,11 +648,11 @@ def parse_auth_file(auth_file):
 
                 users[user] = password
     except IOError as err:
-        logger.error("Couldn't read auth file")
+        logger.critical("Couldn't read auth file")
         raise InternalError(err)
 
     if not users:
-        logger.warn("No users specified.")
+        raise InternalError("No users defined")
 
     return users
 
@@ -678,7 +677,7 @@ def parse_arguments(args):
                       default=DEFAULT_LISTEN_ADDRESS,
                       metavar="LISTEN_ADDRESS",
                       help=("Address to listen for control connections"
-                            "(default: *)"))
+                            "(default: 127.0.0.1)"))
     parser.add_option("--listen-port", dest="listen_port",
                       default=DEFAULT_LISTEN_PORT,
                       metavar="LISTEN_PORT",
@@ -717,9 +716,9 @@ def parse_arguments(args):
                       help=("The maximum port number to use for automatically-"
                             "allocated ephemeral ports (default: %s)" %
                             DEFAULT_MAX_PORT))
-    parser.add_option('--no-ssl', dest="no_ssl",
+    parser.add_option('--enable-ssl', dest="enable_ssl",
                       default=False, action='store_true',
-                      help=("Disable SSL/TLS for control connections "
+                      help=("Enable SSL/TLS for control connections "
                             "(default: False"))
     parser.add_option('--cert-file', dest="cert_file",
                       default=DEFAULT_CERT_FILE,
@@ -839,7 +838,7 @@ def main():
             rlist, _, _ = select(sockets, [], [])
             for ctrl in rlist:
                 client, _ = ctrl.accept()
-                if not opts.no_ssl:
+                if opts.enable_ssl:
                     client = ssl.wrap_socket(client,
                                              server_side=True,
                                              keyfile=opts.key_file,
