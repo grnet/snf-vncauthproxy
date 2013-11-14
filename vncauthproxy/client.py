@@ -17,6 +17,8 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301, USA.
 
+""" vncauthproxy client """
+
 import sys
 import socket
 import ssl
@@ -29,7 +31,7 @@ except ImportError:
 try:
     from gevent import sleep
 except ImportError:
-    import sleep
+    from time import sleep
 
 DEFAULT_SERVER_ADDRESS = '127.0.0.1'
 DEFAULT_SERVER_PORT = 24999
@@ -75,9 +77,9 @@ def parse_arguments(args):
                       metavar="AUTH_PASSWORD",
                       help=("User password for the control connection "
                             "authentication"))
-    parser.add_option("--no-ssl", dest="no_ssl",
+    parser.add_option("--enable-ssl", dest="enable_ssl",
                       action='store_true', default=False,
-                      help=("Disable SSL/TLS for control connecions "
+                      help=("Enable SSL/TLS for control connecions "
                             "(default: %s)" % False))
     parser.add_option("--ca-cert", dest="ca_cert",
                       default=None,
@@ -91,36 +93,33 @@ def parse_arguments(args):
 
     (opts, args) = parser.parse_args(args)
 
-    # Mandatory arguments
-    if not opts.password:
-        parser.error("The -P/--password argument is mandatory.")
-    if not opts.daddr:
-        parser.error("The -d/--dest argument is mandatory.")
-    if not opts.dport:
-        parser.error("The -p/--dport argument is mandatory.")
-    if not opts.auth_user:
-        parser.error("The --auth-user argument is mandatory.")
-    if not opts.auth_password:
-        parser.error("The --auth-password argument is mandatory.")
-
-    # Sanity check
-    if opts.strict and not opts.ca_cert:
-        parser.error("--strict requires --ca-cert to be set")
-    if opts.no_ssl and opts.ca_cert:
-        parser.error("--no-ssl and --ca-cert / --strict options "
-                     "are mutually exclusive")
-
     return (opts, args)
 
 
 def request_forwarding(sport, daddr, dport, password,
                        auth_user, auth_password,
                        server_address=DEFAULT_SERVER_ADDRESS,
-                       server_port=DEFAULT_SERVER_PORT, no_ssl=False,
+                       server_port=DEFAULT_SERVER_PORT, enable_ssl=False,
                        ca_cert=None, strict=False):
     """Connect to vncauthproxy and request a VNC forwarding."""
+
+    # Mandatory arguments
     if not password:
-        raise ValueError("You must specify a non-empty password")
+        raise Exception("The password argument is mandatory.")
+    if not daddr:
+        raise Exception("The daddr argument is mandatory.")
+    if not dport:
+        raise Exception("The dport argument is mandatory.")
+    if not auth_user:
+        raise Exception("The auth_user argument is mandatory.")
+    if not auth_password:
+        raise Exception("The auth_password argument is mandatory.")
+
+    # Sanity check
+    if strict and not ca_cert:
+        raise Exception("strict requires ca-cert to be set")
+    if not enable_ssl and (strict or ca_cert):
+        raise Exception("strict or ca-cert set, but ssl not enabled")
 
     req = {
         "source_port": int(sport),
@@ -146,16 +145,16 @@ def request_forwarding(sport, daddr, dport, password,
                 server = None
                 continue
 
-            if not no_ssl:
+            if enable_ssl:
                 reqs = ssl.CERT_NONE
                 if strict:
                     reqs = ssl.CERT_REQUIRED
                 elif ca_cert:
                     reqs = ssl.CERT_OPTIONAL
 
-                server = ssl.wrap_socket(
-                      server, cert_reqs=reqs, ca_certs=ca_cert,
-                      ssl_version=ssl.PROTOCOL_TLSv1)
+                server = ssl.wrap_socket(server, cert_reqs=reqs,
+                                         ca_certs=ca_cert,
+                                         ssl_version=ssl.PROTOCOL_TLSv1)
 
             server.settimeout(60.0)
 
@@ -191,15 +190,15 @@ if __name__ == '__main__':
                              dport=opts.dport, password=opts.password,
                              auth_user=opts.auth_user,
                              auth_password=opts.auth_password,
-                             no_ssl=opts.no_ssl, ca_cert=opts.ca_cert,
+                             enable_ssl=opts.enable_ssl, ca_cert=opts.ca_cert,
                              strict=opts.strict)
 
     reason = None
     if 'reason' in res:
         reason = 'Reason: %s\n' % res['reason']
     sys.stderr.write("Forwaring %s -> %s:%s: %s\n%s" % (res['source_port'],
-                                                      opts.daddr, opts.dport,
-                                                      res['status'], reason))
+                                                        opts.daddr, opts.dport,
+                                                        res['status'], reason))
 
     if res['status'] == "OK":
         sys.exit(0)
