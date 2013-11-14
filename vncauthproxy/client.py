@@ -33,8 +33,12 @@ try:
 except ImportError:
     from time import sleep
 
+import logging
+
 DEFAULT_SERVER_ADDRESS = '127.0.0.1'
 DEFAULT_SERVER_PORT = 24999
+
+logger = logging.getLogger(__name__)
 
 
 def parse_arguments(args):
@@ -119,7 +123,7 @@ def request_forwarding(sport, daddr, dport, password,
     if strict and not ca_cert:
         raise Exception("strict requires ca-cert to be set")
     if not enable_ssl and (strict or ca_cert):
-        raise Exception("strict or ca-cert set, but ssl not enabled")
+        logger.warning("strict or ca-cert set, but ssl not enabled")
 
     req = {
         "source_port": int(sport),
@@ -184,6 +188,8 @@ def request_forwarding(sport, daddr, dport, password,
 
 
 if __name__ == '__main__':
+    logger.addHandler(logging.StreamHandler())
+
     (opts, args) = parse_arguments(sys.argv[1:])
 
     res = request_forwarding(sport=opts.sport, daddr=opts.daddr,
