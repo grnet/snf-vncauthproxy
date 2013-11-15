@@ -832,18 +832,20 @@ def main():
         logger.critical("Unexpected error")
         sys.exit(1)
 
+    wrap_ssl = lambda sock: sock
+    if opts.enable_ssl:
+        wrap_ssl = lambda sock: ssl.wrap_socket(sock, server_side=True,
+                                                keyfile=opts.key_file,
+                                                certfile=opts.cert_file,
+                                                ssl_version=ssl.PROTOCOL_TLSv1)
+
     while True:
         try:
             client = None
             rlist, _, _ = select(sockets, [], [])
             for ctrl in rlist:
                 client, _ = ctrl.accept()
-                if opts.enable_ssl:
-                    client = ssl.wrap_socket(client,
-                                             server_side=True,
-                                             keyfile=opts.key_file,
-                                             certfile=opts.cert_file,
-                                             ssl_version=ssl.PROTOCOL_TLSv1)
+                client = wrap_ssl(client)
                 logger.info("New control connection")
 
                 VncAuthProxy.spawn(logger, client)
