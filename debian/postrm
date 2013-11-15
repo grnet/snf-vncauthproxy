@@ -2,9 +2,6 @@
 
 case $1 in
 	purge)
-        echo "Removing rc.d links..."
-        update-rc.d vncauthproxy remove
-
 		if which deluser >/dev/null 2>&1; then
 			deluser --quiet vncauthproxy > /dev/null || true
 		fi
@@ -14,5 +11,7 @@ case $1 in
 		fi
 		;;
 esac
+
+#DEBHELPER#
 
 exit 0

@@ -17,9 +17,8 @@ case "$1" in
         chown vncauthproxy:vncauthproxy /var/log/vncauthproxy
         chown vncauthproxy:vncauthproxy /var/lib/vncauthproxy
 
-        echo "Updating rc.d links... "
-        update-rc.d vncauthproxy defaults
-        echo "Starting snf-vncauthproxy...\n"
+        echo "Starting snf-vncauthproxy..."
+        echo
         if [ -x "/usr/sbin/invoke-rc.d" ]; then
             invoke-rc.d vncauthproxy start
         else
@@ -35,5 +34,7 @@ case "$1" in
         exit 1
     ;;
 esac
+
+#DEBHELPER#
 
 exit 0
