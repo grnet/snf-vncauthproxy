@@ -1,4 +1,4 @@
-include vncauthproxy.py LICENSE Changelog README
+include LICENSE Changelog README
 include distribute_setup.py
 
 recursive-include vncauthproxy *

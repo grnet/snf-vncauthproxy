@@ -90,21 +90,21 @@ The snf-vncauthproxy daemon can be either run manually or managed via its init
 script.
 
 If you're using the init script, snf-vncauthproxy reads its paramater from its
-default file (``DAEMON_OPTS`` parameter in ``/etc/default/snf-vncauthproxy``).
+default file (``DAEMON_OPTS`` parameter in ``/etc/default/vncauthproxy``).
 
 By default snf-vncauthproxy will listen to ``127.0.0.1:24999`` TCP, for incoming
 control connections and uses the ``25000-30000`` range for the listening / data
 sockets.
 
-Version 1.4next introduced replaced Unix domain control sockets with TCP
+Version 1.5 introduced replaced Unix domain control sockets with TCP
 control sockets. This change made it necessary to also introduce an
 authentication file to replace the Unix file permissions, which protected the
 domain sockets.
 
-The default path for the auth file is ``/var/lib/snf-vncauthproxy/users``
+The default path for the auth file is ``/var/lib/vncauthproxy/users``
 (configurable by the ``--auth-file`` option). Each line in the file represents
-one user which is allowed to use the control socket and should be in the following
-format:
+one user which is allowed to use the control socket and should be in the
+following format:
 
 .. code-block:: console
 
@@ -114,10 +114,11 @@ format:
 
 The Debian package provides an example users file.
 
-Version 1.4next introduced also support for SSL for the control socket. If you
+Version 1.5 introduced also support for SSL for the control socket. If you
 enable SSL support (``--enable-ssl`` parameter, disabled by default) you wil
 have to provide a certficate and key file (``--cert-file`` and ``--key-file``
-parameters).
+parameters). The default values for certificate and key files are
+``/var/lib/vncauthrpoxy/{cert,key}.pem`` respectively.
 
 For detailed help on its configuration parameters, either consult its man page
 or run:
@@ -149,10 +150,10 @@ nodes), snf-cyclades-app uses snf-vncauthproxy to allow users to connect to the
 VNC servers and access the VNC consoles of their VMs.
 
 If you're running snf-vncauthproxy on the same host as snf-cyclades-app,
-you will only need to configure two Synnefo options. Specifically,
-``VNCAUTHPROXY_USER`` and ``VNCAUTHPROXY_PASSWORD`` in
-``/etc/synnefo/20-snf-cyclades-app-api.conf`` should match a user defined in 
-snf-vncauthproxy's users (auth) file.
+you will only need to configure one Synnefo setting. Specifically,
+the ``CYCLADES_VNCAUTHPROXY_OPTS`` dict in
+``/etc/synnefo/20-snf-cyclades-app-api.conf`` should be edited to match
+snf-vncauthproxy configuration (user, password, SSL support, certificate file).
 
 In case you want to deploy snf-vncauthproxy on a different host than
 snf-cyclades-app, you should make sure that you change the default listening

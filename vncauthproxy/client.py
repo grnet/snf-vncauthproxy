@@ -123,7 +123,7 @@ def request_forwarding(sport, daddr, dport, password,
     if strict and not ca_cert:
         raise Exception("strict requires ca-cert to be set")
     if not enable_ssl and (strict or ca_cert):
-        logger.warning("strict or ca-cert set, but ssl not enabled")
+        logger.warning("strict or ca_cert set, but ssl not enabled")
 
     req = {
         "source_port": int(sport),

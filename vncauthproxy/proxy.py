@@ -73,7 +73,7 @@ import daemon.runner
 import hashlib
 import re
 
-import rfb
+from vncauthproxy import rfb
 
 try:
     import simplejson as json
@@ -144,6 +144,7 @@ class VncAuthProxy(gevent.Greenlet):
         self.client = client
         # A list of worker/forwarder greenlets, one for each direction
         self.workers = []
+        self.listeners = []
         self.sport = None
         self.pool = None
         self.daddr = None
@@ -619,12 +620,12 @@ def get_listening_sockets(sport, saddr=None, reuse_addr=False):
 def parse_auth_file(auth_file):
     supported_ciphers = ('cleartext', 'HA1', None)
     regexp = re.compile(r'^\s*(?P<user>\S+)\s+({(?P<cipher>\S+)})?'
-                        '(?P<pass>\S+)\s*$')
+                        r'(?P<pass>\S+)\s*$')
 
     users = {}
 
     if os.path.isfile(auth_file) is False:
-        logger.warning("Authentication file not found. Continuing without"
+        logger.warning("Authentication file not found. Continuing without "
                        "users")
         return users
 
