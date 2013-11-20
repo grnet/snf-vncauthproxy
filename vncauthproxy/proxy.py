@@ -622,6 +622,12 @@ def parse_auth_file(auth_file):
                         '(?P<pass>\S+)\s*$')
 
     users = {}
+
+    if os.path.isfile(auth_file) is False:
+        logger.warning("Authentication file not found. Continuing without"
+                       "users")
+        return users
+
     try:
         with open(auth_file) as f:
             lines = [l.strip() for l in f.readlines()]
@@ -648,11 +654,11 @@ def parse_auth_file(auth_file):
 
                 users[user] = password
     except IOError as err:
-        logger.critical("Couldn't read auth file")
-        raise InternalError(err)
+        logger.error("Error while reading the auth file:")
+        logger.exception(err)
 
     if not users:
-        raise InternalError("No users defined")
+        logger.warning("No users defined")
 
     return users
 
