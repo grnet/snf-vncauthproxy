@@ -70,8 +70,7 @@ import gevent.event
 import daemon
 import random
 import daemon.runner
-import hashlib
-import re
+import crypt
 
 from vncauthproxy import rfb
 
@@ -345,16 +344,16 @@ class VncAuthProxy(gevent.Greenlet):
             self.password = req['password']
 
             if auth_user not in VncAuthProxy.authdb:
-                msg = "Authentication failure: user not found"
+                msg = "vncauthproxy authentication failure: user not found"
                 raise InternalError(msg)
 
-            (cipher, authdb_password) = VncAuthProxy.authdb[auth_user]
-            if cipher == 'HA1':
-                message = auth_user + ':vncauthproxy:' + auth_password
-                auth_password = hashlib.md5(message).hexdigest()
+            (cipher, salt, authdb_hash) = VncAuthProxy.authdb[auth_user]
+            crypt_result = crypt.crypt(auth_password, '$%s$%s$' %
+                                                      (cipher, salt))
+            passhash = crypt_result.lstrip('$').split('$', 2)[-1]
 
-            if auth_password != authdb_password:
-                msg = "Authentication failure: wrong password"
+            if passhash != authdb_hash:
+                msg = "vncauthproxy authentication failure: wrong password"
                 raise InternalError(msg)
         except KeyError:
             msg = "Malformed request: %s" % buf
@@ -618,10 +617,6 @@ def get_listening_sockets(sport, saddr=None, reuse_addr=False):
 
 
 def parse_auth_file(auth_file):
-    supported_ciphers = ('cleartext', 'HA1', None)
-    regexp = re.compile(r'^\s*(?P<user>\S+)\s+({(?P<cipher>\S+)})?'
-                        r'(?P<pass>\S+)\s*$')
-
     users = {}
 
     if os.path.isfile(auth_file) is False:
@@ -631,32 +626,12 @@ def parse_auth_file(auth_file):
 
     try:
         with open(auth_file) as f:
-            lines = [l.strip() for l in f.readlines()]
-
-            for line in lines:
-                if not line or line.startswith('#'):
-                    continue
-
-                m = regexp.match(line)
-                if not m:
-                    raise InternalError("Invaild entry in auth file: %s"
-                                        % line)
-
-                user = m.group('user')
-                cipher = m.group('cipher')
-                if cipher not in supported_ciphers:
-                    raise InternalError("Unsupported cipher in auth file: "
-                                        "%s" % line)
-
-                password = (cipher, m.group('pass'))
-
-                if user in users:
-                    raise InternalError("Duplicate user entry in auth file")
-
-                users[user] = password
-    except IOError as err:
-        logger.error("Error while reading the auth file:")
+            lines = [l.strip().split(':', 1) for l in f.readlines()]
+            for (user, passhash) in lines:
+                users[user] = passhash.lstrip('$').split('$', 2)
+    except ValueError as err:
         logger.exception(err)
+        raise InternalError("Malformed auth file")
 
     if not users:
         logger.warning("No users defined")

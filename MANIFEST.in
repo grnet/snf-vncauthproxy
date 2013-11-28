@@ -3,4 +3,3 @@ include distribute_setup.py
 
 recursive-include vncauthproxy *
 recursive-include docs *
-recursive-include examples *

@@ -13,3 +13,4 @@ Released: UNRELEASED
 	* Add Changelog, README and docs
 	* Replace Unix domain control sockets with TCP control sockets, with
 	  basic authentication and SSL support.
+	* Add the vncauthproxy-passwd tool to manage the users file.
