@@ -1,29 +1,32 @@
 #!/bin/sh -e
 
 setup_vncauthproxy_user() {
-	if ! getent passwd vncauthproxy >/dev/null; then
-		adduser --quiet --system --no-create-home --home /var/run/vncauthproxy --shell /usr/sbin/nologin vncauthproxy
-	fi
-
 	if ! getent group vncauthproxy >/dev/null; then
 		addgroup --system --quiet vncauthproxy
 	fi
+
+	if ! getent passwd vncauthproxy >/dev/null; then
+		adduser --quiet --system --no-create-home --home /var/run/vncauthproxy --ingroup vncauthproxy --shell /usr/sbin/nologin vncauthproxy
+	fi
+
 }
 
 setup_vncauthproxy_user
 
 case "$1" in
     configure)
-        chown vncauthproxy:vncauthproxy /var/log/vncauthproxy
-        chown vncauthproxy:vncauthproxy /var/lib/vncauthproxy
+        if [ ! -s /var/lib/vncauthproxy/users ]
+        then
+            echo "Configure a vncauthproxy user:"
 
-        echo "Updating rc.d links... "
-        update-rc.d vncauthproxy defaults
-        echo "Starting snf-vncauthproxy...\n"
-        if [ -x "/usr/sbin/invoke-rc.d" ]; then
-            invoke-rc.d vncauthproxy start
-        else
-            /etc/init.d/vncauthproxy start
+            read -p "User: " user
+            if [ "x$user" = "x" ]
+            then
+                echo "cannot add empty user, aborting" >&2
+                exit 1
+            fi
+
+            vncauthproxy-passwd /var/lib/vncauthproxy/users $user
         fi
     ;;
 
@@ -35,5 +38,7 @@ case "$1" in
         exit 1
     ;;
 esac
+
+#DEBHELPER#
 
 exit 0

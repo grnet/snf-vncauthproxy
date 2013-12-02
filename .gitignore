@@ -2,3 +2,4 @@ vncauthproxy/version.py
 *.pyc
 build/
 *.egg-info/
+docs/_build/
