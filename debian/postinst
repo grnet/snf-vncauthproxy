@@ -15,19 +15,6 @@ setup_vncauthproxy_user
 
 case "$1" in
     configure)
-        if [ ! -s /var/lib/vncauthproxy/users ]
-        then
-            echo "Configure a vncauthproxy user:"
-
-            read -p "User: " user
-            if [ "x$user" = "x" ]
-            then
-                echo "cannot add empty user, aborting" >&2
-                exit 1
-            fi
-
-            vncauthproxy-passwd /var/lib/vncauthproxy/users $user
-        fi
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
