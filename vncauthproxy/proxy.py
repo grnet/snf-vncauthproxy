@@ -70,10 +70,9 @@ import gevent.event
 import daemon
 import random
 import daemon.runner
-import hashlib
-import re
+import crypt
 
-import rfb
+from vncauthproxy import rfb
 
 try:
     import simplejson as json
@@ -144,6 +143,7 @@ class VncAuthProxy(gevent.Greenlet):
         self.client = client
         # A list of worker/forwarder greenlets, one for each direction
         self.workers = []
+        self.listeners = []
         self.sport = None
         self.pool = None
         self.daddr = None
@@ -344,16 +344,16 @@ class VncAuthProxy(gevent.Greenlet):
             self.password = req['password']
 
             if auth_user not in VncAuthProxy.authdb:
-                msg = "Authentication failure: user not found"
+                msg = "vncauthproxy authentication failure: user not found"
                 raise InternalError(msg)
 
-            (cipher, authdb_password) = VncAuthProxy.authdb[auth_user]
-            if cipher == 'HA1':
-                message = auth_user + ':vncauthproxy:' + auth_password
-                auth_password = hashlib.md5(message).hexdigest()
+            (cipher, salt, authdb_hash) = VncAuthProxy.authdb[auth_user]
+            crypt_result = crypt.crypt(auth_password, '$%s$%s$' %
+                                                      (cipher, salt))
+            passhash = crypt_result.lstrip('$').split('$', 2)[-1]
 
-            if auth_password != authdb_password:
-                msg = "Authentication failure: wrong password"
+            if passhash != authdb_hash:
+                msg = "vncauthproxy authentication failure: wrong password"
                 raise InternalError(msg)
         except KeyError:
             msg = "Malformed request: %s" % buf
@@ -617,42 +617,24 @@ def get_listening_sockets(sport, saddr=None, reuse_addr=False):
 
 
 def parse_auth_file(auth_file):
-    supported_ciphers = ('cleartext', 'HA1', None)
-    regexp = re.compile(r'^\s*(?P<user>\S+)\s+({(?P<cipher>\S+)})?'
-                        '(?P<pass>\S+)\s*$')
-
     users = {}
+
+    if os.path.isfile(auth_file) is False:
+        logger.warning("Authentication file not found. Continuing without "
+                       "users")
+        return users
+
     try:
         with open(auth_file) as f:
-            lines = [l.strip() for l in f.readlines()]
-
-            for line in lines:
-                if not line or line.startswith('#'):
-                    continue
-
-                m = regexp.match(line)
-                if not m:
-                    raise InternalError("Invaild entry in auth file: %s"
-                                        % line)
-
-                user = m.group('user')
-                cipher = m.group('cipher')
-                if cipher not in supported_ciphers:
-                    raise InternalError("Unsupported cipher in auth file: "
-                                        "%s" % line)
-
-                password = (cipher, m.group('pass'))
-
-                if user in users:
-                    raise InternalError("Duplicate user entry in auth file")
-
-                users[user] = password
-    except IOError as err:
-        logger.critical("Couldn't read auth file")
-        raise InternalError(err)
+            lines = [l.strip().split(':', 1) for l in f.readlines()]
+            for (user, passhash) in lines:
+                users[user] = passhash.lstrip('$').split('$', 2)
+    except ValueError as err:
+        logger.exception(err)
+        raise InternalError("Malformed auth file")
 
     if not users:
-        raise InternalError("No users defined")
+        logger.warning("No users defined")
 
     return users
 
@@ -750,9 +732,6 @@ def main():
 
     opts = parse_arguments(sys.argv[1:])
 
-    # Create pidfile
-    pidf = pidlockfile.TimeoutPIDLockFile(opts.pid_file, 10)
-
     # Initialize logger
     lvl = logging.DEBUG if opts.debug else logging.INFO
 
@@ -766,70 +745,73 @@ def main():
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    # Become a daemon:
-    # Redirect stdout and stderr to handler.stream to catch
-    # early errors in the daemonization process [e.g., pidfile creation]
-    # which will otherwise go to /dev/null.
-    daemon_context = AllFilesDaemonContext(
-        pidfile=pidf,
-        umask=0022,
-        stdout=handler.stream,
-        stderr=handler.stream,
-        files_preserve=[handler.stream])
-
-    # Remove any stale PID files, left behind by previous invocations
-    if daemon.runner.is_pidfile_stale(pidf):
-        logger.warning("Removing stale PID lock file %s", pidf.path)
-        pidf.break_lock()
-
     try:
-        daemon_context.open()
-    except (AlreadyLocked, LockTimeout):
-        logger.critical(("Failed to lock PID file %s, another instance "
-                         "running?"), pidf.path)
-        sys.exit(1)
-    logger.info("Became a daemon")
+        # Create pidfile
+        pidf = pidlockfile.TimeoutPIDLockFile(opts.pid_file, 10)
 
-    # A fork() has occured while daemonizing,
-    # we *must* reinit gevent
-    gevent.reinit()
+        # Init ephemeral port pool
+        ports = range(opts.min_port, opts.max_port + 1)
 
-    # Catch signals to ensure graceful shutdown,
-    #
-    # Uses gevent.signal so the handler fires even during
-    # gevent.socket.accept()
-    gevent.signal(SIGINT, fatal_signal_handler, "SIGINT")
-    gevent.signal(SIGTERM, fatal_signal_handler, "SIGTERM")
+        # Init VncAuthProxy class attributes
+        VncAuthProxy.server_timeout = opts.server_timeout
+        VncAuthProxy.connect_retries = opts.connect_retries
+        VncAuthProxy.retry_wait = opts.retry_wait
+        VncAuthProxy.connect_timeout = opts.connect_timeout
+        VncAuthProxy.ports = ports
 
-    # Init ephemeral port pool
-    ports = range(opts.min_port, opts.max_port + 1)
-
-    # Init VncAuthProxy class attributes
-    VncAuthProxy.server_timeout = opts.server_timeout
-    VncAuthProxy.connect_retries = opts.connect_retries
-    VncAuthProxy.retry_wait = opts.retry_wait
-    VncAuthProxy.connect_timeout = opts.connect_timeout
-    VncAuthProxy.ports = ports
-
-    try:
         VncAuthProxy.authdb = parse_auth_file(opts.auth_file)
+
+        sockets = get_listening_sockets(opts.listen_port, opts.listen_address,
+                                        reuse_addr=True)
+
+        wrap_ssl = lambda sock: sock
+        if opts.enable_ssl:
+            ssl_prot = ssl.PROTOCOL_TLSv1
+            wrap_ssl = lambda sock: ssl.wrap_socket(sock, server_side=True,
+                                                    keyfile=opts.key_file,
+                                                    certfile=opts.cert_file,
+                                                    ssl_version=ssl_prot)
+
+        # Become a daemon:
+        # Redirect stdout and stderr to handler.stream to catch
+        # early errors in the daemonization process [e.g., pidfile creation]
+        # which will otherwise go to /dev/null.
+        daemon_context = AllFilesDaemonContext(
+            pidfile=pidf,
+            umask=0022,
+            stdout=handler.stream,
+            stderr=handler.stream,
+            files_preserve=[handler.stream])
+
+        # Remove any stale PID files, left behind by previous invocations
+        if daemon.runner.is_pidfile_stale(pidf):
+            logger.warning("Removing stale PID lock file %s", pidf.path)
+            pidf.break_lock()
+
+        try:
+            daemon_context.open()
+        except (AlreadyLocked, LockTimeout):
+            raise InternalError(("Failed to lock PID file %s, another "
+                                 "instance running?"), pidf.path)
+
+        logger.info("Became a daemon")
+
+        # A fork() has occured while daemonizing,
+        # we *must* reinit gevent
+        gevent.reinit()
+
+        # Catch signals to ensure graceful shutdown,
+        #
+        # Uses gevent.signal so the handler fires even during
+        # gevent.socket.accept()
+        gevent.signal(SIGINT, fatal_signal_handler, "SIGINT")
+        gevent.signal(SIGTERM, fatal_signal_handler, "SIGTERM")
     except InternalError as err:
         logger.critical(err)
         sys.exit(1)
     except Exception as err:
+        logger.critical("Unexpected error:")
         logger.exception(err)
-        logger.error("Unexpected error")
-        sys.exit(1)
-
-    try:
-        sockets = get_listening_sockets(opts.listen_port, opts.listen_address,
-                                        reuse_addr=True)
-    except InternalError as err:
-        logger.critical("Error binding control socket")
-        sys.exit(1)
-    except Exception as err:
-        logger.exception(err)
-        logger.critical("Unexpected error")
         sys.exit(1)
 
     while True:
@@ -838,29 +820,29 @@ def main():
             rlist, _, _ = select(sockets, [], [])
             for ctrl in rlist:
                 client, _ = ctrl.accept()
-                if opts.enable_ssl:
-                    client = ssl.wrap_socket(client,
-                                             server_side=True,
-                                             keyfile=opts.key_file,
-                                             certfile=opts.cert_file,
-                                             ssl_version=ssl.PROTOCOL_TLSv1)
+                client = wrap_ssl(client)
                 logger.info("New control connection")
 
                 VncAuthProxy.spawn(logger, client)
             continue
         except Exception as err:
+            logger.error("Unexpected error:")
             logger.exception(err)
-            logger.error("Unexpected error")
             if client:
                 client.close()
             continue
         except SystemExit:
             break
 
-    logger.info("Closing control sockets")
-    while sockets:
-        sock = sockets.pop()
-        sock.close()
+    try:
+        logger.info("Closing control sockets")
+        while sockets:
+            sock = sockets.pop()
+            sock.close()
 
-    daemon_context.close()
-    sys.exit(0)
+        daemon_context.close()
+        sys.exit(0)
+    except Exception as err:
+        logger.critical("Unexpected error:")
+        logger.exception(err)
+        sys.exit(1)

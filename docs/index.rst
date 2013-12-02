@@ -18,7 +18,7 @@ Main features include:
   * IPv4 and IPv6 support
   * Configurable timeout for client connections
 
-Its main use is to enable VNC clients to connect to firwalled VNC servers.
+Its main use is to enable VNC clients to connect to firewalled VNC servers.
 
 It is used by `Synnefo <https://code.grnet.gr/projects/synnefo>`_ to provide
 users with (VNC) console access to their VMs.
@@ -26,7 +26,7 @@ users with (VNC) console access to their VMs.
 Installation
 ^^^^^^^^^^^^
 
-snf-vncauthproxy is currently packaged only for Debian (stable / oldstable).
+snf-vncauthproxy is currently packaged only for Debian (stable).
 
 You can find and install the latest version snf-vncauthproxy at Synnefo's apt
 repository:
@@ -37,11 +37,15 @@ To import the GPG key of the repo, use:
 
 | ``curl https://dev.grnet.gr/files/apt-grnetdev.pub | apt-key add -``
 
+In case you're upgrading from an older snf-vncauthproxy version or it's the
+first time you're installing snf-vncauthproxy, you will prompted to configure
+a vncauthproxy user (see below for more information on user management).
+
 Overview
 ^^^^^^^^
 
-snf-vncauthproxy listens on a TCP socket for control (JSON) messages from clients.
-The format of the control messages is:
+snf-vncauthproxy listens on a TCP socket for control (JSON) messages from
+clients. The format of the control messages is:
 
 .. code-block:: console
 
@@ -89,35 +93,71 @@ Usage
 The snf-vncauthproxy daemon can be either run manually or managed via its init
 script.
 
-If you're using the init script, snf-vncauthproxy reads its paramater from its
-default file (``DAEMON_OPTS`` parameter in ``/etc/default/snf-vncauthproxy``).
-
-By default snf-vncauthproxy will listen to ``127.0.0.1:24999`` TCP, for incoming
-control connections and uses the ``25000-30000`` range for the listening / data
-sockets.
-
-Version 1.4next introduced replaced Unix domain control sockets with TCP
-control sockets. This change made it necessary to also introduce an
-authentication file to replace the Unix file permissions, which protected the
-domain sockets.
-
-The default path for the auth file is ``/var/lib/snf-vncauthproxy/users``
-(configurable by the ``--auth-file`` option). Each line in the file represents
-one user which is allowed to use the control socket and should be in the following
-format:
+If you're using the init script, snf-vncauthproxy reads its options from its
+default file (``DAEMON_OPTS`` parameter in ``/etc/default/vncauthproxy``).
+Refer to the vncauthproxy help output for a detailed listing and information
+on all available options:
 
 .. code-block:: console
 
-    user password
-    user1 {cleartext}password
-    user2 {HA1}md5hash
+    # vncauthproxy --help
 
-The Debian package provides an example users file.
+By default snf-vncauthproxy will listen to ``127.0.0.1:24999`` TCP, for
+incoming control connections and uses the ``25000-30000`` range for the
+listening / data sockets.
 
-Version 1.4next introduced also support for SSL for the control socket. If you
+Version 1.5 replaced Unix domain control sockets with TCP control sockets. This
+change made it necessary to introduce an authentication file to replace the
+POSIX file permissions, which protected the domain sockets.
+
+The default path for the auth file is ``/var/lib/vncauthproxy/users``
+(configurable by the ``--auth-file`` option). Each line in the file represents
+one user which is allowed to use the control socket and should be in the
+following format:
+
+.. code-block:: console
+
+    username:$6$salt$hash
+
+The password part of the line (after the colon) is the output of crypt(), using
+a random 16-char salt with SHA-512.
+
+To manage the authentication file, you can use the vncauthproxy-passwd tool,
+to easily add, update and delete users:
+
+To add a user:
+
+.. code-block:: console
+
+    # vncauthproxy-passwd /var/lib/vncauthproxy/users user
+
+You will be prompted for a password.
+
+To delete a user:
+
+.. code-block:: console
+
+    # vncauthproxy-passwd -D /var/lib/vncauthproxy/users user
+
+See the help output of the tool for more options:
+
+.. code-block:: console
+
+    # vncauthproxy-passwd -h
+
+.. warning:: The vncauthproxy daemon requires a restart for the changes in the
+ authentication file to take effect.
+
+.. warning:: After installing snf-vncauthproxy for the fist time, make sure
+ that you create a valid authentication file and define any users needed. The
+ vncauthproxy daemon will start but will not be usable if no users are defined
+ or if no authentication file is present.
+
+Version 1.5 introduced also support for SSL for the control socket. If you
 enable SSL support (``--enable-ssl`` parameter, disabled by default) you wil
 have to provide a certficate and key file (``--cert-file`` and ``--key-file``
-parameters).
+parameters). The default values for certificate and key files are
+``/var/lib/vncauthrpoxy/{cert,key}.pem`` respectively.
 
 For detailed help on its configuration parameters, either consult its man page
 or run:
@@ -149,10 +189,10 @@ nodes), snf-cyclades-app uses snf-vncauthproxy to allow users to connect to the
 VNC servers and access the VNC consoles of their VMs.
 
 If you're running snf-vncauthproxy on the same host as snf-cyclades-app,
-you will only need to configure two Synnefo options. Specifically,
-``VNCAUTHPROXY_USER`` and ``VNCAUTHPROXY_PASSWORD`` in
-``/etc/synnefo/20-snf-cyclades-app-api.conf`` should match a user defined in 
-snf-vncauthproxy's users (auth) file.
+you will only need to configure one Synnefo setting. Specifically,
+the ``CYCLADES_VNCAUTHPROXY_OPTS`` dict in
+``/etc/synnefo/20-snf-cyclades-app-api.conf`` should be edited to match
+snf-vncauthproxy configuration (user, password, SSL support, certificate file).
 
 In case you want to deploy snf-vncauthproxy on a different host than
 snf-cyclades-app, you should make sure that you change the default listening
@@ -160,9 +200,18 @@ address (and / or port) for snf-vncauthproxy and make sure that
 snf-cyclades-app can connect to the snf-vncauthproxy on the listening address /
 port. It's also recommended to enable SSL on the control socket in that case.
 
-.. include:: changelog.rst
+Changelog
+^^^^^^^^^
 
-.. include:: upgrade.rst
+* v1.5 :ref:`Changelog <Changelog-1.5>`
+
+Upgrade notes
+^^^^^^^^^^^^^
+
+.. toctree::
+   :maxdepth: 1
+
+    v1.4 -> v1.5 <upgrade/upgrade-1.5.rst>
 
 Contact
 ^^^^^^^

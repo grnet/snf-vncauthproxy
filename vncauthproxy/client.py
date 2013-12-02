@@ -59,25 +59,22 @@ def parse_arguments(args):
                       help=("Use source port PORT for incoming connections "
                             "(default: allocate a port automatically)"))
     parser.add_option("-d", "--dest",
-                      default=None, dest="daddr",
+                      dest="daddr",
                       metavar="HOST",
                       help="Proxy connection to destination host HOST")
     parser.add_option("-p", "--dport", dest="dport",
-                      default=None, type="int",
+                      type="int",
                       metavar="PORT",
                       help="Proxy connection to destination port PORT")
     parser.add_option("-P", "--password", dest="password",
-                      default=None,
                       metavar="PASSWORD",
                       help=("Use password PASSWD to authenticate incoming "
                             "VNC connections"))
     parser.add_option("--auth-user", dest="auth_user",
-                      default=None,
                       metavar="AUTH_USER",
                       help=("User to authenticate as, for the control "
                             "connection"))
     parser.add_option("--auth-password", dest="auth_password",
-                      default=None,
                       metavar="AUTH_PASSWORD",
                       help=("User password for the control connection "
                             "authentication"))
@@ -105,19 +102,37 @@ def request_forwarding(sport, daddr, dport, password,
                        server_address=DEFAULT_SERVER_ADDRESS,
                        server_port=DEFAULT_SERVER_PORT, enable_ssl=False,
                        ca_cert=None, strict=False):
-    """Connect to vncauthproxy and request a VNC forwarding."""
+    """ Connect to vncauthproxy and request a VNC forwarding.
 
-    # Mandatory arguments
-    if not password:
-        raise Exception("The password argument is mandatory.")
-    if not daddr:
-        raise Exception("The daddr argument is mandatory.")
-    if not dport:
-        raise Exception("The dport argument is mandatory.")
-    if not auth_user:
-        raise Exception("The auth_user argument is mandatory.")
-    if not auth_password:
-        raise Exception("The auth_password argument is mandatory.")
+        @type sport: int
+        @param sport: Source port for incoming connections
+                      (0 for automatic allocation)"
+        @type daddr: str
+        @param daddr: Destination address for the forwarding
+        @type dport: int
+        @param dport: Destination port for the forwarding
+        @type password: str
+        @param password: VNC server auth password
+        @type auth_user: str
+        @param auth_user: vncauthproxy user
+        @type auth_password: str
+        @param auth_password: vncauthproxy password
+        @type server_address: str
+        @param server_address: Listening address for the vncauthproxy daemon
+                               (default: 127.0.0.1)
+        @type server_port: int
+        @param server_port: Listening port for the vncauthproxy daemon
+                           (default: 24999)
+        @type enable_ssl: bool
+        @param enable_ssl: Enable / disable SSL on the control socket
+        @type ca_cert: str
+        @param ca_cert: Path to the CA cert file
+        @type strict: bool
+        @param strict: Enable strict cert checking for SSL
+        @rtype: dict
+        @return: Server response in dict / JSON format
+
+        """
 
     # Sanity check
     if strict and not ca_cert:
@@ -191,6 +206,19 @@ if __name__ == '__main__':
     logger.addHandler(logging.StreamHandler())
 
     (opts, args) = parse_arguments(sys.argv[1:])
+
+    # Mandatory arguments
+    if opts.password is None:
+        sys.stderr.write("The password argument is mandatory.\n")
+        sys.exit(1)
+    if opts.daddr is None:
+        sys.stderr.write("The daddr argument is mandatory.\n")
+    if opts.dport is None:
+        sys.stderr.write("The dport argument is mandatory.\n")
+    if opts.auth_user is None:
+        sys.stderr.write("The auth_user argument is mandatory.\n")
+    if opts.auth_password is None:
+        sys.stderr.write("The auth_password argument is mandatory.\n")
 
     res = request_forwarding(sport=opts.sport, daddr=opts.daddr,
                              dport=opts.dport, password=opts.password,
