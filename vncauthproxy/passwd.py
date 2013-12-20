@@ -88,7 +88,7 @@ def write_wrapper(passwdfile, lines, dry_run):
             f.write("".join(lines))
         os.rename(fpath, passwdfile)
     else:
-        sys.stderr.write("".join(lines))
+        sys.stdout.write("".join(lines))
 
 
 def delete_user(user, passwdfile):
