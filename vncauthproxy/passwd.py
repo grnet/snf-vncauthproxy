@@ -53,8 +53,6 @@ def parse_arguments():
 def gen_salt():
     """ Generate 16-char salt string. """
     chars = list(string.ascii_letters + string.digits + "./")
-    random.shuffle(chars)
-
     return "".join(random.choice(chars) for x in range(16))
 
 
