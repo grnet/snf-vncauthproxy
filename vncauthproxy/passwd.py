@@ -83,10 +83,10 @@ def find_user(lines, user):
 def write_wrapper(passwdfile, lines, dry_run):
     """ Dry-run wrapper for write. """
     if not dry_run:
-        (fd, name) = tempfile.mkstemp()
+        (fd, fpath) = tempfile.mkstemp(dir=os.path.dirname(passwdfile))
         with os.fdopen(fd, "w+") as f:
             f.write("".join(lines))
-        os.rename(name, passwdfile)
+        os.rename(fpath, passwdfile)
     else:
         sys.stderr.write("".join(lines))
 
