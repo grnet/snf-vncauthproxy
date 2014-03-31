@@ -110,9 +110,6 @@ def add_or_update_user(user, passwdfile):
     if password == "":
         fail("Password cannot be empty")
 
-    if password != getpass.getpass("Retype password: "):
-        fail("Passwords don't match")
-
     newline = gen_hash(user, password)
 
     lines = [newline]
