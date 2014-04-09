@@ -38,14 +38,21 @@ def parse_arguments():
     parser.add_argument("-n", "--dry-run", action="store_true", dest="dry_run",
                         help="Display the results on stdout without updating "
                         "the passwd file")
-    parser.add_argument("-D", "--delete", action="store_true",
-                        dest="delete_user", help="Delete user from file")
+    parser.add_argument("-d", "--delete", action="store_true",
+                        dest="delete_user", help="delete user from file")
+    parser.add_argument("-p", "--password", dest="password",
+                        metavar='PASSWORD', default=None,
+                        help="use cli-provided password")
     parser.add_argument("passwdfile", metavar="file", type=str, nargs=1,
                         help="Path to the passwd file")
     parser.add_argument("user", metavar="user", type=str, nargs=1,
                         help="User to edit")
 
     args = parser.parse_args()
+
+    if args.delete_user is True and args.password is not None:
+        parser.print_help()
+        fail("Cannot specify -d and -p opts at the same time")
 
     return args
 
@@ -104,11 +111,12 @@ def delete_user(user, passwdfile):
     return lines
 
 
-def add_or_update_user(user, passwdfile):
+def add_or_update_user(user, passwdfile, password):
     """ Add or update user from passwdfile. """
-    password = getpass.getpass()
-    if password == "":
-        fail("Password cannot be empty")
+    if password is None:
+        password = getpass.getpass()
+        if password == "":
+            fail("Password cannot be empty")
 
     newline = gen_hash(user, password)
 
@@ -132,6 +140,7 @@ def main():
 
         user = args.user[0]
         passwdfile = args.passwdfile[0]
+        password = args.password
 
         user_re = r'^[a-z_][a-z0-9_]{0,30}$'
         if re.match(user_re, user) is None:
@@ -140,7 +149,7 @@ def main():
         if args.delete_user:
             lines = delete_user(user, passwdfile)
         else:
-            lines = add_or_update_user(user, passwdfile)
+            lines = add_or_update_user(user, passwdfile, password)
 
         write_wrapper(passwdfile, lines, args.dry_run)
     except KeyboardInterrupt:
