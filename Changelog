@@ -8,7 +8,7 @@ Changelog for snf-vncauthproxy
 v1.5
 ====
 
-Released: UNRELEASED
+Released: Mon Jun 23 11:51:43 EEST 2014
 
 	* Add Changelog, README and docs
 	* Replace Unix domain control sockets with TCP control sockets, with
