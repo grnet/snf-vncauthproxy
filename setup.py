@@ -40,7 +40,8 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'vncauthproxy = vncauthproxy.proxy:main'
+            'vncauthproxy = vncauthproxy.proxy:main',
+            'vncauthproxy-passwd = vncauthproxy.passwd:main'
         ]
     }
 )

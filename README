@@ -1,0 +1,33 @@
+snf-vncauthproxy
+================
+
+snf-vncauthproxy is a daemon, which acts as a VNC authentication proxy between
+a VNC client and server.
+
+snf-vncauthproxy's daemon listens on a TCP socket for control messages and sets
+up one-time port forwardings upon request.
+
+Main features include:
+  * Lightweight, coroutine-based main loop with gevent
+  * Supports RFB protocol version 3.8
+  * IPv4 and IPv6 support
+  * Configurable timeout for client connections
+
+Its main use is to enable VNC clients to connect to firwalled VNC servers.
+
+It is used by Synnefo (snf-cyclades-app) to provide users with (VNC) console
+access to their VMs.
+
+For more information, see the relevant docs:
+
+http://www.synnefo.org/docs/snf-vncauthproxy/latest/
+
+and 
+
+http://www.synnefo.org/docs/synnefo/latest/
+
+License
+=======
+
+snf-vncauthproxy is licensed under GNU Generic Public License version 2
+(GPLv2), please see LICENSE for the full text.

@@ -3,20 +3,20 @@ Section: python
 Priority: optional
 Maintainer: Vangelis Koukis <vkoukis@grnet.gr>
 Build-Depends: debhelper (>= 7.0.50~), python-all (>= 2.5), python-setuptools
-Standards-Version: 3.9.2
+Standards-Version: 3.9.4
 XS-Python-Version: >= 2.5
 Homepage: https://code.grnet.gr/projects/snf-vncauthproxy
 Vcs-Browser: https://code.grnet.gr/git/snf-vncauthproxy
 
 Package: snf-vncauthproxy
 Architecture: all
-Depends: ${misc:Depends}, ${python:Depends}, python-setuptools
+Depends: ${misc:Depends}, ${python:Depends}, python-setuptools, adduser
 Provides: ${python:Provides}, vncauthproxy
 Replaces: vncauthproxy
 Conflicts: vncauthproxy
 XB-Python-Version: ${python:Versions}
 Description: VNC authentication proxy
- vncauthproxy listens on a UNIX domain socket for control messages and sets up
+ vncauthproxy listens on a TCP socket for control messages and sets up
  one-time port forwardings upon request.
  .
  Main features include:

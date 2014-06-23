@@ -1,0 +1,17 @@
+#!/bin/sh -e
+
+case $1 in
+	purge)
+		if which deluser >/dev/null 2>&1; then
+			deluser --quiet vncauthproxy > /dev/null || true
+		fi
+
+		if which delgroup >/dev/null 2>&1; then
+			delgroup --quiet vncauthproxy > /dev/null || true
+		fi
+		;;
+esac
+
+#DEBHELPER#
+
+exit 0

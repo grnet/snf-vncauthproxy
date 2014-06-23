@@ -18,8 +18,9 @@ NAME="vncauthproxy"
 DESC="VNC authentication proxy"
 RUNDIR=/var/run/$NAME
 LOGDIR=/var/log/$NAME
+LIBDIR=/var/lib/$NAME
 PIDFILE=$RUNDIR/$NAME.pid
-CHUID="nobody:nogroup"
+CHUID="vncauthproxy:vncauthproxy"
 
 . /lib/lsb/init-functions
 
@@ -32,9 +33,17 @@ DAEMON_OPTS="--pid-file=$PIDFILE"
 
 case "$1" in
   start)
-	mkdir -p $RUNDIR
-	chown $CHUID $RUNDIR $LOGDIR
-	chmod 0755 $RUNDIR $LOGDIR
+    # Probably not needed anymore
+    mkdir -p $RUNDIR
+
+    chown -R $CHUID $RUNDIR $LOGDIR $LIBDIR
+    chmod 0750 $RUNDIR $LOGDIR
+    chmod 0755 $LIBDIR
+
+    if [ -s $LIBDIR/users ]
+    then
+        chmod 0640 $LIBDIR/users
+    fi
 
 	if pidofproc -p $PIDFILE $DAEMON > /dev/null; then
 		log_failure_msg "Starting $DESC (already started)"
@@ -61,7 +70,7 @@ case "$1" in
 	$0 start
 	;;
   status)
-	status_of_proc -p $PIDFILE $BIN $NAME && exit 0 || exit $?
+	status_of_proc $DAEMON $NAME
 	;;
   *)
 	echo "Usage: ${0} {start|stop|restart|force-reload|status}" >&2

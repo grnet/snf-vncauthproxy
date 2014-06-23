@@ -1,0 +1,31 @@
+#!/bin/sh -e
+
+setup_vncauthproxy_user() {
+	if ! getent group vncauthproxy >/dev/null; then
+		addgroup --system --quiet vncauthproxy
+	fi
+
+	if ! getent passwd vncauthproxy >/dev/null; then
+		adduser --quiet --system --no-create-home --home /var/run/vncauthproxy --ingroup vncauthproxy --shell /usr/sbin/nologin vncauthproxy
+	fi
+
+}
+
+setup_vncauthproxy_user
+
+case "$1" in
+    configure)
+    ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0
