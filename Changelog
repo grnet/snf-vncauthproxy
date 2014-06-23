@@ -1,0 +1,16 @@
+.. _Changelog:
+
+Changelog for snf-vncauthproxy
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. _Changelog-1.5:
+
+v1.5
+====
+
+Released: Mon Jun 23 11:51:43 EEST 2014
+
+	* Add Changelog, README and docs
+	* Replace Unix domain control sockets with TCP control sockets, with
+	  basic authentication and SSL support.
+	* Add the vncauthproxy-passwd tool to manage the users file.
