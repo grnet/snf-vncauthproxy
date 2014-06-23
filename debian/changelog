@@ -1,8 +1,8 @@
-snf-vncauthproxy (1.5~rc2-1~wheezy) wheezy; urgency=low
+snf-vncauthproxy (1.5-1~wheezy) wheezy; urgency=high
 
-  * release build
+  * New upstream release
 
- -- Stratos Psomadakis <psomas@grnet.gr>  Fri, 20 Jun 2014 17:06:36 +0300
+ -- Stratos Psomadakis <psomas@grnet.gr>  Mon, 23 Jun 2014 11:56:23 +0300
 
 snf-vncauthproxy (1.4-1) stable; urgency=high
 
@@ -30,5 +30,6 @@ snf-vncauthproxy (1.1-1) stable; urgency=low
   * Initial release. Official vncauthproxy + patches
 
  -- Vangelis Koukis <vkoukis@grnet.gr>  Thu, 2 Nov 2011 18:11:37 +0200
+
 
 
