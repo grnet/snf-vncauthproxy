@@ -38,8 +38,9 @@ To import the GPG key of the repo, use:
 | ``curl https://dev.grnet.gr/files/apt-grnetdev.pub | apt-key add -``
 
 In case you're upgrading from an older snf-vncauthproxy version or it's the
-first time you're installing snf-vncauthproxy, you will prompted to configure
-a vncauthproxy user (see below for more information on user management).
+first time you're installing snf-vncauthproxy, you should create a vncauthproxy
+user, in order to have a functional vncauthproxy installation (see below for
+more information on user management).
 
 Overview
 ^^^^^^^^
