@@ -24,3 +24,4 @@ Description: VNC authentication proxy
   * Supports RFB protocol version 3.8
   * IPv4 and IPv6 support
   * Configurable timeout for client connections
+  * Supports WebSockets
