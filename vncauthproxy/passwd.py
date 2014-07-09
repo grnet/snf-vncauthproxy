@@ -38,8 +38,11 @@ def parse_arguments():
     parser.add_argument("-n", "--dry-run", action="store_true", dest="dry_run",
                         help="Display the results on stdout without updating "
                         "the passwd file")
-    parser.add_argument("-D", "--delete", action="store_true",
-                        dest="delete_user", help="Delete user from file")
+    parser.add_argument("-d", "--delete", action="store_true",
+                        dest="delete_user", help="delete user from file")
+    parser.add_argument("-p", "--password", dest="password",
+                        metavar='PASSWORD', default=None,
+                        help="use cli-provided password")
     parser.add_argument("passwdfile", metavar="file", type=str, nargs=1,
                         help="Path to the passwd file")
     parser.add_argument("user", metavar="user", type=str, nargs=1,
@@ -47,14 +50,16 @@ def parse_arguments():
 
     args = parser.parse_args()
 
+    if args.delete_user is True and args.password is not None:
+        parser.print_help()
+        fail("Cannot specify -d and -p opts at the same time")
+
     return args
 
 
 def gen_salt():
     """ Generate 16-char salt string. """
     chars = list(string.ascii_letters + string.digits + "./")
-    random.shuffle(chars)
-
     return "".join(random.choice(chars) for x in range(16))
 
 
@@ -83,12 +88,12 @@ def find_user(lines, user):
 def write_wrapper(passwdfile, lines, dry_run):
     """ Dry-run wrapper for write. """
     if not dry_run:
-        (fd, name) = tempfile.mkstemp()
+        (fd, fpath) = tempfile.mkstemp(dir=os.path.dirname(passwdfile))
         with os.fdopen(fd, "w+") as f:
             f.write("".join(lines))
-        os.rename(name, passwdfile)
+        os.rename(fpath, passwdfile)
     else:
-        sys.stderr.write("".join(lines))
+        sys.stdout.write("".join(lines))
 
 
 def delete_user(user, passwdfile):
@@ -101,19 +106,17 @@ def delete_user(user, passwdfile):
     if not user_line:
         fail("User not found!")
 
-    (idx, line) = user_line
+    (_, line) = user_line
     lines.remove(line)
     return lines
 
 
-def add_or_update_user(user, passwdfile):
+def add_or_update_user(user, passwdfile, password):
     """ Add or update user from passwdfile. """
-    password = getpass.getpass()
-    if password == "":
-        fail("Password cannot be empty")
-
-    if password != getpass.getpass("Retype password: "):
-        fail("Passwords don't match")
+    if password is None:
+        password = getpass.getpass()
+        if password == "":
+            fail("Password cannot be empty")
 
     newline = gen_hash(user, password)
 
@@ -137,6 +140,7 @@ def main():
 
         user = args.user[0]
         passwdfile = args.passwdfile[0]
+        password = args.password
 
         user_re = r'^[a-z_][a-z0-9_]{0,30}$'
         if re.match(user_re, user) is None:
@@ -145,7 +149,7 @@ def main():
         if args.delete_user:
             lines = delete_user(user, passwdfile)
         else:
-            lines = add_or_update_user(user, passwdfile)
+            lines = add_or_update_user(user, passwdfile, password)
 
         write_wrapper(passwdfile, lines, args.dry_run)
     except KeyboardInterrupt:
