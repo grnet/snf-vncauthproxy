@@ -1,3 +1,9 @@
+snf-vncauthproxy (1.6~rc1-1~wheezy) wheezy; urgency=low
+
+  * Add support for HTML5 WebSocket clients
+
+ -- Ilias Tsitsimpis <iliastsi@grnet.gr>  Thu, 25 Sep 2014 15:44:32 +0300
+
 snf-vncauthproxy (1.5-1~wheezy) wheezy; urgency=high
 
   * New upstream release
@@ -30,6 +36,7 @@ snf-vncauthproxy (1.1-1) stable; urgency=low
   * Initial release. Official vncauthproxy + patches
 
  -- Vangelis Koukis <vkoukis@grnet.gr>  Thu, 2 Nov 2011 18:11:37 +0200
+
 
 
 
