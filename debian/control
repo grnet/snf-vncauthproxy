@@ -21,7 +21,7 @@ Description: VNC authentication proxy
  .
  Main features include:
   * Lightweight, coroutine-based main loop with gevent
-  * Supports RFB protocol version 3.8
+  * Support for the RFB protocol version 3.8
   * IPv4 and IPv6 support
   * Configurable timeout for client connections
-  * Supports WebSockets
+  * Support for WebSockets
