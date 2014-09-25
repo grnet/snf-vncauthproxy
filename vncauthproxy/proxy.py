@@ -3,7 +3,7 @@
 vncauthproxy - a VNC authentication proxy
 """
 #
-# Copyright (c) 2010-2013 Greek Research and Technology Network S.A.
+# Copyright (c) 2010-2014 Greek Research and Technology Network S.A.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -73,6 +73,10 @@ import daemon.runner
 import crypt
 
 from vncauthproxy import rfb
+from vncauthproxy.websockets import (LoggedStream, LoggedStderr, VNCWS,
+                                     VNCWebSocketWSGIApplication,
+                                     VNCWSGIServer)
+from vncauthproxy.circbuffer import CircularBuffer
 
 try:
     import simplejson as json
@@ -89,7 +93,6 @@ try:
     from daemon import pidfile as pidlockfile
 except ImportError:
     from daemon import pidlockfile
-
 
 logger = None
 
@@ -150,6 +153,12 @@ class VncAuthProxy(gevent.Greenlet):
         self.dport = None
         self.server = None
         self.password = None
+        self.dead_event = None
+        self.client_connected = None
+        self.client_rx = None
+        self.client_tx = None
+        self.ws = None
+        self.ssl = None
 
     def _cleanup(self):
         """Cleanup everything: workers, sockets, ports
@@ -178,7 +187,7 @@ class VncAuthProxy(gevent.Greenlet):
 
         # Reintroduce the port number of the client socket in
         # the port pool, if applicable.
-        if not self.pool is None:
+        if self.pool is not None:
             self.pool.append(self.sport)
             self.debug("Returned port %d to port pool, contains %d ports",
                        self.sport, len(self.pool))
@@ -295,6 +304,57 @@ class VncAuthProxy(gevent.Greenlet):
 
         self.server = server
 
+    def _establish_proxy(self):
+        # Bridge both connections through the "forwarder" greenlets.
+        # This greenlet will wait until any of the workers dies.
+        # Final cleanup will take place in _cleanup().
+        self.dead_event = gevent.event.Event()
+        self.dead_event.clear()
+
+        self.listeners = get_listening_sockets(self.sport, reuse_addr=True)
+
+        if self.ws:
+            # To work around gevent's braindead direct-to-stderr logging, we
+            # pass a fake stderr object which logs to a Python logger, see
+            # definition of LoggedStream.
+            logged_stderr = LoggedStream(sys.stderr, logger, logging.DEBUG,
+                                         "WSGIServer stderr")
+
+            # Create two circular buffers for server<->websocket client comms
+            self.client_tx = CircularBuffer(16384)
+            self.client_rx = CircularBuffer(16384)
+
+            self.client_connected = gevent.event.Event()
+            self.client_connected.clear()
+
+            # FIXME: Atm, we only support the binary ws protocol
+            wsgiapp = VNCWebSocketWSGIApplication(self.dead_event,
+                                                  self.client_connected,
+                                                  self._forward,
+                                                  self.client_tx,
+                                                  self.client_rx,
+                                                  handler_cls=VNCWS,
+                                                  protocols="binary")
+
+            wsgiservers = []
+            ssl_params = {}
+            if self.ssl:
+                ssl_params = {
+                    'certfile': VncAuthProxy.certfile,
+                    'keyfile': VncAuthProxy.keyfile
+                }
+            mutex = gevent.coros.Semaphore(1)
+            for sock in self.listeners:
+                # We set spawn=1 explicitly. "spawn=None" has the effect of
+                # things running in the hub, see:
+                # https://googlegroups/d/msg/gevent/T4PAVwmUXbI/4VegQeYxxmoJ
+                # for all the details.
+                wsgiservers.append(VNCWSGIServer(mutex, wsgiservers, sock,
+                                                 wsgiapp, log=logged_stderr,
+                                                 spawn=1, **ssl_params))
+                worker = gevent.Greenlet(wsgiservers[-1].serve_forever)
+                self.workers.append(worker)
+
     def _establish_connection(self):
         client = self.client
         ports = VncAuthProxy.ports
@@ -320,6 +380,8 @@ class VncAuthProxy(gevent.Greenlet):
             #         <user for control connection authentication>,
             #      "auth_password":
             #         <password for control connection authentication>,
+            #      "type":
+            #         <interface to use (vnc, vnc-ws, vnc-wss)>
             # }
             #
             # The <password> is used for MITM authentication of clients
@@ -342,6 +404,14 @@ class VncAuthProxy(gevent.Greenlet):
             self.daddr = req['destination_address']
             self.dport = int(req['destination_port'])
             self.password = req['password']
+            console_type = req['type']
+
+            supported_console_types = ["vnc", "vnc-ws", "vnc-wss"]
+            if console_type not in supported_console_types:
+                raise InternalError("%s not supported" % console_type)
+
+            self.ws = console_type in ["vnc-ws", "vnc-wss"]
+            self.ssl = console_type in ["vnc-wss"]
 
             if auth_user not in VncAuthProxy.authdb:
                 msg = "vncauthproxy authentication failure: user not found"
@@ -393,8 +463,8 @@ class VncAuthProxy(gevent.Greenlet):
             self.sport = sport
             self.pool = pool
 
-            self.listeners = get_listening_sockets(sport)
             self._perform_server_handshake()
+            self._establish_proxy()
 
             self.info("New forwarding: %d (client req'd: %d) -> %s:%d",
                       sport, sport_orig, self.daddr, self.dport)
@@ -432,7 +502,7 @@ class VncAuthProxy(gevent.Greenlet):
             client.send(json.dumps(response))
             client.close()
 
-    def _client_handshake(self):
+    def _client_handshake(self, client_tx, client_rx):
         """
         Perform handshake/authentication with a connecting client
 
@@ -448,8 +518,8 @@ class VncAuthProxy(gevent.Greenlet):
         Upon return, self.client socket is connected to the client.
 
         """
-        self.client.send(rfb.RFB_VERSION_3_8 + "\n")
-        client_version_str = self.client.recv(1024)
+        client_tx.send(rfb.RFB_VERSION_3_8 + "\n")
+        client_version_str = client_rx.recv(1024)
         client_version = rfb.check_version(client_version_str)
         if not client_version:
             self.error("Invalid version: %s", client_version_str)
@@ -459,11 +529,11 @@ class VncAuthProxy(gevent.Greenlet):
         self.debug("Requesting authentication")
         auth_request = rfb.make_auth_request(rfb.RFB_AUTHTYPE_VNC,
                                              version=client_version)
-        self.client.send(auth_request)
+        client_tx.send(auth_request)
 
         # The client gets to propose an authtype only for RFB 3.8
         if client_version == rfb.RFB_VERSION_3_8:
-            res = self.client.recv(1024)
+            res = client_rx.recv(1024)
             type = rfb.parse_client_authtype(res)
             if type == rfb.RFB_AUTHTYPE_ERROR:
                 self.warn("Client refused authentication: %s", res[1:])
@@ -472,13 +542,13 @@ class VncAuthProxy(gevent.Greenlet):
 
             if type != rfb.RFB_AUTHTYPE_VNC:
                 self.error("Wrong auth type: %d", type)
-                self.client.send(rfb.to_u32(rfb.RFB_AUTH_ERROR))
+                client_tx.send(rfb.to_u32(rfb.RFB_AUTH_ERROR))
                 raise gevent.GreenletExit
 
         # Generate the challenge
         challenge = os.urandom(16)
-        self.client.send(challenge)
-        response = self.client.recv(1024)
+        client_tx.send(challenge)
+        response = client_rx.recv(1024)
         if len(response) != 16:
             self.error("Wrong response length %d, should be 16", len(response))
             raise gevent.GreenletExit
@@ -487,60 +557,79 @@ class VncAuthProxy(gevent.Greenlet):
             self.debug("Authentication successful")
         else:
             self.warn("Authentication failed")
-            self.client.send(rfb.to_u32(rfb.RFB_AUTH_ERROR))
+            client_tx.send(rfb.to_u32(rfb.RFB_AUTH_ERROR))
             raise gevent.GreenletExit
 
         # Accept the authentication
-        self.client.send(rfb.to_u32(rfb.RFB_AUTH_SUCCESS))
+        client_tx.send(rfb.to_u32(rfb.RFB_AUTH_SUCCESS))
 
     def _proxy(self):
         try:
+            # This callback will get called if any of the workers dies.
+            def callback(g):
+                self.debug("Worker %d/%d died", self.workers.index(g) + 1,
+                           len(self.workers))
+                if not self.ws or self.client_connected.is_set():
+                    self.dead_event.set()
+
             self.info("Waiting for a client to connect at %s",
                       ", ".join(["%s:%d" % s.getsockname()[:2]
                                  for s in self.listeners]))
-            rlist, _, _ = select(self.listeners, [], [],
-                                 timeout=VncAuthProxy.connect_timeout)
-            if not rlist:
-                self.info("Timed out, no connection after %d sec",
-                          VncAuthProxy.connect_timeout)
-                raise gevent.GreenletExit
 
-            for sock in rlist:
-                self.client, addrinfo = sock.accept()
-                self.info("Connection from %s:%d", *addrinfo[:2])
+            if self.ws:
+                for w in self.workers:
+                    w.link(callback)
+                    with LoggedStderr(logger, logging.DEBUG,
+                                      "WSGIServer stderr"):
+                        w.start()
+                self.client_connected.wait(VncAuthProxy.connect_timeout)
+                if not self.client_connected.is_set():
+                    self.info("Timed out, no connection after %d sec",
+                              VncAuthProxy.connect_timeout)
+                    for w in self.workers:
+                        w.kill()
+                    raise gevent.GreenletExit
 
-                # Close all listening sockets, we only want a one-shot
-                # connection from a single client.
-                while self.listeners:
-                    sock = self.listeners.pop().close()
-                break
+                for w in self.workers:
+                    if w.dead:
+                        self.workers.remove(w)
+
+                self.client = self.client_tx
+            else:
+                rlist, _, _ = select(self.listeners, [], [],
+                                     timeout=VncAuthProxy.connect_timeout)
+                if not rlist:
+                    self.info("Timed out, no connection after %d sec",
+                              VncAuthProxy.connect_timeout)
+                    raise gevent.GreenletExit
+
+                for sock in rlist:
+                    self.client, addrinfo = sock.accept()
+                    self.info("Connection from %s:%d", *addrinfo[:2])
+
+                    # Close all listening sockets, we only want a one-shot
+                    # connection from a single client.
+                    while self.listeners:
+                        sock = self.listeners.pop().close()
+                    break
+
+                self.client_tx = self.client
+                self.client_rx = self.client
 
             # Perform RFB handshake with the client.
-            self._client_handshake()
-
-            # Bridge both connections through two "forwarder" greenlets.
-            # This greenlet will wait until any of the workers dies.
-            # Final cleanup will take place in _cleanup().
-            dead = gevent.event.Event()
-            dead.clear()
-
-            # This callback will get called if any of the two workers dies.
-            def callback(g):
-                self.debug("Worker %d/%d died", self.workers.index(g),
-                           len(self.workers))
-                dead.set()
+            self._client_handshake(self.client_tx, self.client_rx)
 
             self.workers.append(gevent.spawn(self._forward,
-                                             self.client, self.server))
+                                             self.server, self.client_tx))
             self.workers.append(gevent.spawn(self._forward,
-                                             self.server, self.client))
-            for g in self.workers:
+                                             self.client_rx, self.server))
+            for g in self.workers[-2:]:
                 g.link(callback)
 
             # Wait until any of the workers dies
             self.debug("Waiting for any of %d workers to die",
                        len(self.workers))
-            dead.wait()
+            self.dead_event.wait()
 
             # We can go now, _cleanup() will take care of
             # all worker, socket and port cleanup
@@ -760,6 +849,9 @@ def main():
         VncAuthProxy.ports = ports
 
         VncAuthProxy.authdb = parse_auth_file(opts.auth_file)
+
+        VncAuthProxy.keyfile = opts.key_file
+        VncAuthProxy.certfile = opts.cert_file
 
         sockets = get_listening_sockets(opts.listen_port, opts.listen_address,
                                         reuse_addr=True)

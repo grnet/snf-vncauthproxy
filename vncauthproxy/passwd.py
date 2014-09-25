@@ -106,7 +106,7 @@ def delete_user(user, passwdfile):
     if not user_line:
         fail("User not found!")
 
-    (idx, line) = user_line
+    (_, line) = user_line
     lines.remove(line)
     return lines
 
