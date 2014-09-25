@@ -14,10 +14,10 @@ up one-time port forwardings upon request.
 
 Main features include:
   * Lightweight, coroutine-based main loop with gevent
-  * Supports RFB protocol version 3.8
+  * Support for the RFB protocol version 3.8
   * IPv4 and IPv6 support
   * Configurable timeout for client connections
-  * Supports HTML5 WebSocket clients
+  * Support for HTML5 WebSocket clients
 
 Its main use is to enable VNC clients to connect to firewalled VNC servers.
 
