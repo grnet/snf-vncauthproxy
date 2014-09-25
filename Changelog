@@ -5,10 +5,10 @@ Changelog for snf-vncauthproxy
 
 .. _Changelog-1.6:
 
-v1.6
-====
+v1.6rc1
+=======
 
-Released: UNRELEASED
+Released: Thu Sep 25 15:20:45 EEST 2014
 
 	* Add support for WebSockets
 
