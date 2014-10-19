@@ -64,6 +64,13 @@ DEFAULT_AUTH_FILE = "/var/lib/vncauthproxy/users"
 
 import os
 import sys
+
+# logging will import threading. Make sure to monkey patch threading before it
+# gets loaded, to avoid an exception in the threading library (fixed in
+# Python 3.3)
+from gevent import monkey
+monkey.patch_thread()
+
 import logging
 import gevent
 import gevent.event
@@ -93,6 +100,7 @@ try:
     from daemon import pidfile as pidlockfile
 except ImportError:
     from daemon import pidlockfile
+
 
 logger = None
 
