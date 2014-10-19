@@ -208,7 +208,7 @@ def request_forwarding(sport, daddr, dport, password, auth_user, auth_password,
     return res
 
 
-if __name__ == '__main__':
+def main():
     logger.addHandler(logging.StreamHandler())
 
     (opts, args) = parse_arguments(sys.argv[1:])
