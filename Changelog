@@ -5,6 +5,15 @@ Changelog for snf-vncauthproxy
 
 .. _Changelog-1.6:
 
+v1.6rc2
+=======
+
+Released: UNRELEASED
+
+	* Add the ``--proxy-listen-address`` command line option and update the
+	  JSON response to include the ``proxy_address`` key, which specifies where
+	  vncauthproxy will listen to for incoming client connections.
+
 v1.6rc1
 =======
 
