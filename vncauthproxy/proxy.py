@@ -44,6 +44,8 @@ DEFAULT_CONNECT_TIMEOUT = 30
 # By default, listen for client connections everywhere
 DEFAULT_PROXY_LISTEN_ADDRESS = "*"
 
+INADDR_ANY = [None, "*", "0.0.0.0", "::", "::0"]
+
 # Port range for the listening sockets
 #
 # We must take care not to fall into the ephemeral port range,
@@ -487,8 +489,11 @@ class VncAuthProxy(gevent.Greenlet):
                       VncAuthProxy.proxy_address, sport, sport_orig,
                       self.daddr, self.dport)
             response = {"source_port": sport,
-                        "status": "OK",
-                        "proxy_address": VncAuthProxy.proxy_address}
+                        "status": "OK"}
+            if VncAuthProxy.proxy_address not in INADDR_ANY:
+                response["proxy_address"] = VncAuthProxy.proxy_address
+            else:  # Return FQDN, since * is useless for the client
+                response["proxy_address"] = VncAuthProxy.fqdn
         except IndexError:
             self.error("FAILED forwarding, out of ports for [req'd by "
                        "client: %s:%d -> %s:%d]",
@@ -881,6 +886,7 @@ def main():
         VncAuthProxy.certfile = opts.cert_file
 
         VncAuthProxy.proxy_address = opts.proxy_listen_address
+        VncAuthProxy.fqdn = socket.getfqdn()
 
         sockets = get_listening_sockets(opts.listen_port, opts.listen_address,
                                         reuse_addr=True)
