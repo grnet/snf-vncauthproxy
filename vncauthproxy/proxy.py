@@ -41,6 +41,11 @@ DEFAULT_RETRY_WAIT = 0.1
 # Connect timeout for the listening sockets
 DEFAULT_CONNECT_TIMEOUT = 30
 
+# By default, listen for client connections everywhere
+DEFAULT_PROXY_LISTEN_ADDRESS = "*"
+
+INADDR_ANY = [None, "*", "0.0.0.0", "::", "::0"]
+
 # Port range for the listening sockets
 #
 # We must take care not to fall into the ephemeral port range,
@@ -64,6 +69,13 @@ DEFAULT_AUTH_FILE = "/var/lib/vncauthproxy/users"
 
 import os
 import sys
+
+# logging will import threading. Make sure to monkey patch threading before it
+# gets loaded, to avoid an exception in the threading library (fixed in
+# Python 3.3)
+from gevent import monkey
+monkey.patch_thread()
+
 import logging
 import gevent
 import gevent.event
@@ -93,6 +105,7 @@ try:
     from daemon import pidfile as pidlockfile
 except ImportError:
     from daemon import pidlockfile
+
 
 logger = None
 
@@ -196,8 +209,9 @@ class VncAuthProxy(gevent.Greenlet):
         raise gevent.GreenletExit
 
     def __str__(self):
-        return "VncAuthProxy: %d -> %s:%d" % (self.sport, self.daddr,
-                                              self.dport)
+        return "VncAuthProxy: %s:%d -> %s:%d" % (VncAuthProxy.proxy_address,
+                                                 self.sport, self.daddr,
+                                                 self.dport)
 
     def _forward(self, source, dest):
         """
@@ -311,7 +325,9 @@ class VncAuthProxy(gevent.Greenlet):
         self.dead_event = gevent.event.Event()
         self.dead_event.clear()
 
-        self.listeners = get_listening_sockets(self.sport, reuse_addr=True)
+        self.listeners = get_listening_sockets(self.sport,
+                                               VncAuthProxy.proxy_address,
+                                               reuse_addr=True)
 
         if self.ws:
             # To work around gevent's braindead direct-to-stderr logging, we
@@ -363,6 +379,7 @@ class VncAuthProxy(gevent.Greenlet):
         response = {
             "source_port": 0,
             "status": "FAILED",
+            "proxy_address": None,
         }
         try:
             # Control request, in JSON:
@@ -378,21 +395,23 @@ class VncAuthProxy(gevent.Greenlet):
             #         <the password to use to authenticate clients>
             #     "auth_user":
             #         <user for control connection authentication>,
-            #      "auth_password":
+            #     "auth_password":
             #         <password for control connection authentication>,
-            #      "type":
+            #     "type":
             #         <interface to use (vnc, vnc-ws, vnc-wss)>
             # }
             #
             # The <password> is used for MITM authentication of clients
-            # connecting to <source_port>, who will subsequently be
-            # forwarded to a VNC server listening at
+            # connecting to <proxy_address:source_port>, who will subsequently
+            # be forwarded to a VNC server listening at
             # <destination_address>:<destination_port>
             #
             # Control reply, in JSON:
             # {
             #     "source_port": <the allocated source port>
             #     "status": <one of "OK" or "FAILED">
+            #     "proxy_address": <listening address / host  for client
+            #                       connections>
             # }
             #
             buf = client.recv(1024)
@@ -466,19 +485,26 @@ class VncAuthProxy(gevent.Greenlet):
             self._perform_server_handshake()
             self._establish_proxy()
 
-            self.info("New forwarding: %d (client req'd: %d) -> %s:%d",
-                      sport, sport_orig, self.daddr, self.dport)
+            self.info("New forwarding: %s:%d (client req'd: %d) -> %s:%d",
+                      VncAuthProxy.proxy_address, sport, sport_orig,
+                      self.daddr, self.dport)
             response = {"source_port": sport,
                         "status": "OK"}
+            if VncAuthProxy.proxy_address not in INADDR_ANY:
+                response["proxy_address"] = VncAuthProxy.proxy_address
+            else:  # Return FQDN, since * is useless for the client
+                response["proxy_address"] = VncAuthProxy.fqdn
         except IndexError:
             self.error("FAILED forwarding, out of ports for [req'd by "
-                       "client: %d -> %s:%d]",
-                       sport_orig, self.daddr, self.dport)
+                       "client: %s:%d -> %s:%d]",
+                       VncAuthProxy.proxy_address, sport_orig, self.daddr,
+                       self.dport)
             raise gevent.GreenletExit
         except InternalError as err:
             self.error(err)
-            self.error(("FAILED forwarding: %d (client req'd: %d) -> "
-                        "%s:%d"), sport, sport_orig, self.daddr, self.dport)
+            self.error(("FAILED forwarding: %s:%d (client req'd: %d) -> "
+                        "%s:%d"), VncAuthProxy.proxy_address, sport,
+                       sport_orig, self.daddr, self.dport)
             if pool:
                 pool.append(sport)
                 self.debug("Returned port %d to pool, %d remanining",
@@ -489,8 +515,9 @@ class VncAuthProxy(gevent.Greenlet):
         except Exception as err:
             self.exception(err)
             self.error("Unexpected error")
-            self.error(("FAILED forwarding: %d (client req'd: %d) -> "
-                        "%s:%d"), sport, sport_orig, self.daddr, self.dport)
+            self.error(("FAILED forwarding: %s:%d (client req'd: %d) -> "
+                        "%s:%d"), VncAuthProxy.proxy_address, sport,
+                       sport_orig, self.daddr, self.dport)
             if pool:
                 pool.append(sport)
                 self.debug("Returned port %d to pool, %d remanining",
@@ -806,6 +833,11 @@ def parse_arguments(args):
                       metavar='AUTHFILE',
                       help=("Authentication file (default: %s)" %
                             DEFAULT_AUTH_FILE))
+    parser.add_option("--proxy-listen-address", dest="proxy_listen_address",
+                      default=DEFAULT_PROXY_LISTEN_ADDRESS,
+                      metavar="PROXY_LISTEN_ADDRESS",
+                      help=("Address to listen for client connections"
+                            "(default: *)"))
 
     (opts, args) = parser.parse_args(args)
 
@@ -852,6 +884,9 @@ def main():
 
         VncAuthProxy.keyfile = opts.key_file
         VncAuthProxy.certfile = opts.cert_file
+
+        VncAuthProxy.proxy_address = opts.proxy_listen_address
+        VncAuthProxy.fqdn = socket.getfqdn()
 
         sockets = get_listening_sockets(opts.listen_port, opts.listen_address,
                                         reuse_addr=True)

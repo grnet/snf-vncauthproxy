@@ -16,9 +16,6 @@
 # 02110-1301, USA.
 
 
-from gevent import monkey
-monkey.patch_all()
-
 from threading import Lock, Event
 
 

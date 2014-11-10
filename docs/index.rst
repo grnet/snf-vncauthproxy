@@ -14,10 +14,10 @@ up one-time port forwardings upon request.
 
 Main features include:
   * Lightweight, coroutine-based main loop with gevent
-  * Supports RFB protocol version 3.8
+  * Support for the RFB protocol version 3.8
   * IPv4 and IPv6 support
   * Configurable timeout for client connections
-  * Supports HTML5 WebSocket clients
+  * Support for HTML5 WebSocket clients
 
 Its main use is to enable VNC clients to connect to firewalled VNC servers.
 
@@ -70,7 +70,7 @@ clients. The format of the control messages is:
      }
 
      The <password> is used for MITM authentication of clients
-     connecting to <source_port>, who will subsequently be
+     connecting to <proxy_address:source_port>, who will subsequently be
      forwarded to a VNC server listening at
      <destination_address>:<destination_port>
 
@@ -78,6 +78,8 @@ clients. The format of the control messages is:
      {
          "source_port": <the allocated source port>
          "status": <one of "OK" or "FAILED">
+         "proxy_address": <listening address / host  for client
+                           connections>
      }
 
 snf-vncauthproxy will then spawn a greenlet to handle the incoming control
@@ -218,11 +220,15 @@ the ``CYCLADES_VNCAUTHPROXY_OPTS`` dict in
 ``/etc/synnefo/20-snf-cyclades-app-api.conf`` should be edited to match
 snf-vncauthproxy configuration (user, password, SSL support, certificate file).
 
-In case you want to deploy snf-vncauthproxy on a different host than
+In case you want to deploy snf-vncauthproxy on a different host other than
 snf-cyclades-app, you should make sure that you change the default listening
-address (and / or port) for snf-vncauthproxy and make sure that
-snf-cyclades-app can connect to the snf-vncauthproxy on the listening address /
-port. It's also recommended to enable SSL on the control socket in that case.
+address (and / or port) and the proxy address (``--proxy-listen-address``) for
+snf-vncauthproxy and make sure that snf-cyclades-app can connect to the
+snf-vncauthproxy on the listening address / port and that clients can connect
+to the proxy address.  It's also recommended to enable SSL on the control
+socket in that case. You can refer to the Synnefo `admin guide
+<https://www.synnefo.org/docs/synnefo/latest/admin-guide.html#admin-guide-vnc`_
+for more information.
 
 Starting with v0.16, Synnefo supports WebSockets for the VNC console (the
 Synnefo Compute API supports all the 'console types' supported by
