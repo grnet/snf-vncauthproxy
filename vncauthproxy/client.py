@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2010-2011 Greek Research and Technology Network S.A.
+# Copyright (c) 2010-2014 Greek Research and Technology Network S.A.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -78,6 +78,10 @@ def parse_arguments(args):
                       metavar="AUTH_PASSWORD",
                       help=("User password for the control connection "
                             "authentication"))
+    parser.add_option("--type", dest="console_type",
+                      metavar="console_type",
+                      help=("Console type requested (vnc, vnc-ws, "
+                            "vnc-wss)"))
     parser.add_option("--enable-ssl", dest="enable_ssl",
                       action='store_true', default=False,
                       help=("Enable SSL/TLS for control connecions "
@@ -97,11 +101,10 @@ def parse_arguments(args):
     return (opts, args)
 
 
-def request_forwarding(sport, daddr, dport, password,
-                       auth_user, auth_password,
+def request_forwarding(sport, daddr, dport, password, auth_user, auth_password,
                        server_address=DEFAULT_SERVER_ADDRESS,
                        server_port=DEFAULT_SERVER_PORT, enable_ssl=False,
-                       ca_cert=None, strict=False):
+                       ca_cert=None, strict=False, console_type="vnc"):
     """ Connect to vncauthproxy and request a VNC forwarding.
 
         @type sport: int
@@ -117,12 +120,14 @@ def request_forwarding(sport, daddr, dport, password,
         @param auth_user: vncauthproxy user
         @type auth_password: str
         @param auth_password: vncauthproxy password
+        @type console_type: str
+        @param console_type: console type requested (default: "vnc")
         @type server_address: str
         @param server_address: Listening address for the vncauthproxy daemon
                                (default: 127.0.0.1)
         @type server_port: int
         @param server_port: Listening port for the vncauthproxy daemon
-                           (default: 24999)
+                            (default: 24999)
         @type enable_ssl: bool
         @param enable_ssl: Enable / disable SSL on the control socket
         @type ca_cert: str
@@ -147,6 +152,7 @@ def request_forwarding(sport, daddr, dport, password,
         "password": password,
         "auth_user": auth_user,
         "auth_password": auth_password,
+        "type": console_type,
     }
 
     last_error = None
@@ -202,7 +208,7 @@ def request_forwarding(sport, daddr, dport, password,
     return res
 
 
-if __name__ == '__main__':
+def main():
     logger.addHandler(logging.StreamHandler())
 
     (opts, args) = parse_arguments(sys.argv[1:])
@@ -213,26 +219,34 @@ if __name__ == '__main__':
         sys.exit(1)
     if opts.daddr is None:
         sys.stderr.write("The daddr argument is mandatory.\n")
+        sys.exit(1)
     if opts.dport is None:
         sys.stderr.write("The dport argument is mandatory.\n")
+        sys.exit(1)
     if opts.auth_user is None:
         sys.stderr.write("The auth_user argument is mandatory.\n")
+        sys.exit(1)
     if opts.auth_password is None:
         sys.stderr.write("The auth_password argument is mandatory.\n")
+        sys.exit(1)
+    if opts.console_type is None:
+        sys.stderr.write("The type argument is mandatory.\n")
+        sys.exit(1)
 
     res = request_forwarding(sport=opts.sport, daddr=opts.daddr,
                              dport=opts.dport, password=opts.password,
                              auth_user=opts.auth_user,
                              auth_password=opts.auth_password,
+                             console_type=opts.console_type,
                              enable_ssl=opts.enable_ssl, ca_cert=opts.ca_cert,
                              strict=opts.strict)
 
     reason = None
     if 'reason' in res:
         reason = 'Reason: %s\n' % res['reason']
-    sys.stderr.write("Forwaring %s -> %s:%s: %s\n%s" % (res['source_port'],
-                                                        opts.daddr, opts.dport,
-                                                        res['status'], reason))
+    sys.stderr.write("Forwaring %s:%s -> %s:%s: %s\n%s" %
+                     (res['proxy_address'], res['source_port'], opts.daddr,
+                      opts.dport, res['status'], reason))
 
     if res['status'] == "OK":
         sys.exit(0)

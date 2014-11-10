@@ -1,4 +1,4 @@
-# Copyright (c) 2010-2013 Greek Research and Technology Network S.A.
+# Copyright (c) 2010-2014 Greek Research and Technology Network S.A.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -37,10 +37,12 @@ setup(
     install_requires=[
         'python-daemon',
         'gevent',
+        'ws4py',
     ],
     entry_points={
         'console_scripts': [
             'vncauthproxy = vncauthproxy.proxy:main',
+            'vncauthproxy-client = vncauthproxy.client:main',
             'vncauthproxy-passwd = vncauthproxy.passwd:main'
         ]
     }
