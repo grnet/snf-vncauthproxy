@@ -1,12 +1,13 @@
 Source: snf-vncauthproxy
 Section: python
 Priority: optional
-Maintainer: Vangelis Koukis <vkoukis@grnet.gr>
-Build-Depends: debhelper (>= 7.0.50~), python-all (>= 2.5), python-setuptools
-Standards-Version: 3.9.4
+Maintainer: Synnefo development team <synnefo-devel@googlegroups.com>
+Build-Depends: debhelper (>= 7.0.50~), python-all (>= 2.5), python-setuptools,
+ dh-python
+Standards-Version: 3.9.6
 XS-Python-Version: >= 2.5
-Homepage: https://code.grnet.gr/projects/snf-vncauthproxy
-Vcs-Browser: https://code.grnet.gr/git/snf-vncauthproxy
+Homepage: https://github.com/grnet/snf-vncauthproxy
+Vcs-Browser: https://github.com/grnet/snf-vncauthproxy
 
 Package: snf-vncauthproxy
 Architecture: all
