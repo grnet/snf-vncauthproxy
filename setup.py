@@ -15,9 +15,6 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301, USA.
 
-import distribute_setup
-distribute_setup.use_setuptools()
-
 from setuptools import setup
 
 from vncauthproxy.version import __version__
