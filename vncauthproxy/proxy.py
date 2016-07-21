@@ -359,7 +359,7 @@ class VncAuthProxy(gevent.Greenlet):
                     'certfile': VncAuthProxy.certfile,
                     'keyfile': VncAuthProxy.keyfile
                 }
-            mutex = gevent.coros.Semaphore(1)
+            mutex = gevent.lock.Semaphore(1)
             for sock in self.listeners:
                 # We set spawn=1 explicitly. "spawn=None" has the effect of
                 # things running in the hub, see:

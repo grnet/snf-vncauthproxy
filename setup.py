@@ -36,7 +36,7 @@ setup(
     zip_safe=False,
     install_requires=[
         'python-daemon',
-        'gevent',
+        'gevent>=1.0',
         'ws4py',
     ],
     entry_points={
