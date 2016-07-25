@@ -3,22 +3,26 @@
 Changelog for snf-vncauthproxy
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+.. _Changelog-1.7:
+
+v1.7
+====
+
+Released: Mon Jul 25 14:37:01 EEST 2016
+
+	* Remove distribute setup dependency
+	* Add compatibility with gevent >= 1.0
+
 .. _Changelog-1.6:
 
-v1.6rc2
+v1.6
 =======
 
-Released: UNRELEASED
+Released: Sat 11 Oct 14:40:32 EEST 2014
 
 	* Add the ``--proxy-listen-address`` command line option and update the
 	  JSON response to include the ``proxy_address`` key, which specifies where
 	  vncauthproxy will listen to for incoming client connections.
-
-v1.6rc1
-=======
-
-Released: Thu Sep 25 15:20:45 EEST 2014
-
 	* Add support for WebSockets
 
 .. _Changelog-1.5:
