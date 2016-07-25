@@ -3,6 +3,16 @@
 Changelog for snf-vncauthproxy
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+.. _Changelog-1.7:
+
+v1.7
+====
+
+Released: UNRELEASED
+
+	* Remove distribute setup dependency
+	* Add compatibility with gevent >= 1.0
+
 .. _Changelog-1.6:
 
 v1.6rc2
