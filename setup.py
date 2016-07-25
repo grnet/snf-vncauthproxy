@@ -1,4 +1,7 @@
-# Copyright (c) 2010-2014 Greek Research and Technology Network S.A.
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# Copyright (c) 2010-2016 Greek Research and Technology Network S.A.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,16 +18,16 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301, USA.
 
-import distribute_setup
-distribute_setup.use_setuptools()
-
+from os.path import dirname, abspath, join
 from setuptools import setup
+from imp import load_source
 
-from vncauthproxy.version import __version__
+CWD = dirname(abspath(__file__))
+VERSION = join(CWD, 'vncauthproxy', 'version.py')
 
 setup(
     name="vncauthproxy",
-    version=__version__,
+    version=getattr(load_source('version', VERSION), "__version__"),
     description="VNC authentication proxy",
     author="Synnefo development team",
     author_email="synnefo-devel@googlegroups.com",
@@ -36,12 +39,13 @@ setup(
     zip_safe=False,
     install_requires=[
         'python-daemon',
-        'gevent',
+        'gevent>=1.0',
         'ws4py',
     ],
     entry_points={
         'console_scripts': [
             'vncauthproxy = vncauthproxy.proxy:main',
+            'vncauthproxy-client = vncauthproxy.client:main',
             'vncauthproxy-passwd = vncauthproxy.passwd:main'
         ]
     }

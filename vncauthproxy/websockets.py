@@ -142,7 +142,7 @@ class VNCWebSocketWSGIApplication(_ws4py_WebSocketWSGIApplication):
         self._forward = forward
         self._server_rx = server_rx
         self._server_tx = server_tx
-        self._single = gevent.coros.Semaphore(1)
+        self._single = gevent.lock.Semaphore(1)
         self._dead = dead
         self._connected = connected
 

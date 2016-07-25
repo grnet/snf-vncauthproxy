@@ -127,7 +127,7 @@ def request_forwarding(sport, daddr, dport, password, auth_user, auth_password,
                                (default: 127.0.0.1)
         @type server_port: int
         @param server_port: Listening port for the vncauthproxy daemon
-                           (default: 24999)
+                            (default: 24999)
         @type enable_ssl: bool
         @param enable_ssl: Enable / disable SSL on the control socket
         @type ca_cert: str
@@ -208,7 +208,7 @@ def request_forwarding(sport, daddr, dport, password, auth_user, auth_password,
     return res
 
 
-if __name__ == '__main__':
+def main():
     logger.addHandler(logging.StreamHandler())
 
     (opts, args) = parse_arguments(sys.argv[1:])
@@ -244,9 +244,9 @@ if __name__ == '__main__':
     reason = None
     if 'reason' in res:
         reason = 'Reason: %s\n' % res['reason']
-    sys.stderr.write("Forwaring %s -> %s:%s: %s\n%s" % (res['source_port'],
-                                                        opts.daddr, opts.dport,
-                                                        res['status'], reason))
+    sys.stderr.write("Forwaring %s:%s -> %s:%s: %s\n%s" %
+                     (res['proxy_address'], res['source_port'], opts.daddr,
+                      opts.dport, res['status'], reason))
 
     if res['status'] == "OK":
         sys.exit(0)
