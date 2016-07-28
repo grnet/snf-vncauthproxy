@@ -1,3 +1,11 @@
+snf-vncauthproxy (1.7-2~jessie) jessie; urgency=medium
+
+  * Add missing python-daemon dependency
+  * Remove /var/run/vncauthproxy dir from the package. Check
+    dir-or-file-in-var-run Lintian report for more info
+
+ -- Nikos Skalkotos <skalkoto@grnet.gr>  Thu, 28 Jul 2016 17:28:46 +0300
+
 snf-vncauthproxy (1.7-1~jessie) jessie; urgency=medium
 
   * New upstream version
@@ -42,6 +50,7 @@ snf-vncauthproxy (1.1-1) stable; urgency=low
   * Initial release. Official vncauthproxy + patches
 
  -- Vangelis Koukis <vkoukis@grnet.gr>  Thu, 2 Nov 2011 18:11:37 +0200
+
 
 
 
