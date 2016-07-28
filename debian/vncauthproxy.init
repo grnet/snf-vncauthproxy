@@ -33,7 +33,6 @@ DAEMON_OPTS="--pid-file=$PIDFILE"
 
 case "$1" in
   start)
-    # Probably not needed anymore
     mkdir -p $RUNDIR
 
     chown -R $CHUID $RUNDIR $LOGDIR $LIBDIR
